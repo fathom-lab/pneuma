@@ -165,6 +165,26 @@
   }
   .sb-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sb-item-meta { font-family: var(--mono); font-size: 9.5px; color: var(--archive); }
+  .sb-item-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .sb-item-del {
+    background: transparent;
+    border: none;
+    color: var(--archive);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1;
+    width: 14px; height: 14px;
+    padding: 0;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 200ms var(--ease), color 200ms var(--ease);
+  }
+  .sb-item:hover .sb-item-del { opacity: 0.5; }
+  .sb-item-del:hover { opacity: 1; color: var(--warn); }
   .sb-empty {
     padding: 20px 12px;
     color: var(--archive);
@@ -351,6 +371,67 @@
     display: block;
     margin-top: 18px;
   }
+
+  /* ─── styxx demo button (lets you SEE it work without anthropic) ─── */
+  .styxx-demo-btn {
+    margin-top: 28px;
+    background: transparent;
+    border: 1px solid var(--rule);
+    color: var(--graphite);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    padding: 10px 18px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 200ms var(--ease);
+    font-style: normal;
+  }
+  .styxx-demo-btn:hover {
+    border-color: var(--signal);
+    color: var(--signal);
+  }
+  .styxx-demo-btn.running {
+    color: var(--ink);
+    border-color: rgba(200, 168, 107, 0.42);
+    background: rgba(200, 168, 107, 0.06);
+    cursor: default;
+  }
+  .styxx-demo-stage {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--archive);
+    margin-top: 18px;
+    min-height: 16px;
+    text-transform: none;
+    font-style: normal;
+  }
+  .styxx-demo-stage strong {
+    color: var(--ink);
+    font-weight: 500;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: none;
+    display: inline;
+    margin: 0;
+  }
+  .styxx-demo-stage .nums { color: var(--graphite); margin-left: 10px; }
+  .styxx-demo-stage .nums .v { color: var(--signal); }
+  .styxx-demo-text {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 14px;
+    color: var(--graphite);
+    margin: 10px auto 0;
+    max-width: 520px;
+    opacity: 0;
+    transition: opacity 400ms var(--ease);
+    line-height: 1.5;
+  }
+  .styxx-demo-text.show { opacity: 0.85; }
 
   .turn { margin-bottom: 28px; }
   .turn-head {
@@ -988,7 +1069,7 @@
     <aside class="sidebar">
       <div class="sb-brand">
         <span class="pi">π</span><span class="neuma">neuma</span>
-        <span class="sb-brand-tag">v0.2.0</span>
+        <span class="sb-brand-tag">v0.5.0</span>
       </div>
 
       <div class="sb-actions">
@@ -1112,6 +1193,9 @@
         </div>
         <div class="palette-item" data-action="session:clear">
           <span class="glyph">∅</span><span>clear current session</span><span class="desc">irreversible</span>
+        </div>
+        <div class="palette-item" data-action="session:clearall">
+          <span class="glyph">⌫</span><span>delete ALL sessions</span><span class="desc">irreversible · confirms first</span>
         </div>
         <div class="palette-item" data-action="settings:key">
           <span class="glyph">⚙</span><span>change api key</span><span class="desc">re-open setup</span>
@@ -1686,7 +1770,17 @@
       }
       el.innerHTML = html;
       $$('.sb-item').forEach(item => {
-        item.addEventListener('click', () => loadSession(item.dataset.id));
+        item.addEventListener('click', (e) => {
+          // ignore clicks on the delete button
+          if (e.target.closest('.sb-item-del')) return;
+          loadSession(item.dataset.id);
+        });
+      });
+      $$('.sb-item-del').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteSession(btn.dataset.del);
+        });
       });
     }
     function sessionItem(s) {
@@ -1695,8 +1789,37 @@
       const title = escapeHtml(s.title || 'new session');
       return `<div class="sb-item${active}" data-id="${s.id}">
         <span class="sb-item-title">${title}</span>
-        <span class="sb-item-meta">${ago}</span>
+        <span class="sb-item-actions">
+          <span class="sb-item-meta">${ago}</span>
+          <button class="sb-item-del" data-del="${s.id}" title="delete session" aria-label="delete">×</button>
+        </span>
       </div>`;
+    }
+
+    function deleteSession(id) {
+      if (!state.sessions[id]) return;
+      delete state.sessions[id];
+      // if we deleted the current session, jump to the most recent remaining (or new)
+      if (state.sessionId === id) {
+        const remaining = Object.values(state.sessions).sort((a, b) => b.lastActive - a.lastActive);
+        if (remaining.length) {
+          loadSession(remaining[0].id);
+          return;   // loadSession persists + renders
+        } else {
+          newSession();
+          return;   // newSession persists + renders
+        }
+      }
+      persist();
+      renderSidebar();
+    }
+
+    function clearAllSessions() {
+      const count = Object.keys(state.sessions).length;
+      if (!count) return;
+      if (!confirm(`delete all ${count} session${count === 1 ? '' : 's'}? this cannot be undone.`)) return;
+      state.sessions = {};
+      newSession();   // creates a fresh one + persists + renders
     }
     function relativeTime(ts) {
       const s = Math.floor((Date.now() - ts) / 1000);
@@ -1717,8 +1840,13 @@
         inner.innerHTML = `<div class="empty-state">
           a quiet room. you and the agent.<br>
           type below — pneuma replies in lowercase, says "i don't know" when it doesn't, and refuses to flatter.
-          <strong>v0.2.0 · sycophancy phrases counted live</strong>
+          <strong>v0.5.0 · operational coder shell · structural plan-mode · per-tool claim scoring</strong>
+          <button class="styxx-demo-btn" id="demo-btn">▶ see styxx fire</button>
+          <div class="styxx-demo-stage" id="demo-stage"></div>
+          <div class="styxx-demo-text" id="demo-text"></div>
         </div>`;
+        const btn = document.getElementById('demo-btn');
+        if (btn) btn.addEventListener('click', runStyxxDemo);
         return;
       }
       inner.innerHTML = '';
@@ -1870,7 +1998,7 @@
       $('#stat-turn').textContent = `0t · $0.00`;
       const mInfo = MODEL_DEFAULTS[state.model] || { in: 0, out: 0 };
       $('#stat-session').textContent = `${state.sessionTokensIn + state.sessionTokensOut}t · $${state.sessionCostUsd.toFixed(2)} / $5.00`;
-      $('#stat-center').textContent = `v0.2.0 · ${state.mode}-mode · ${state.streaming ? 'streaming' : 'cap $5.00 / session · no edits applied'}`;
+      $('#stat-center').textContent = `v0.5.0 · ${state.mode}-mode · ${state.streaming ? 'streaming' : 'cap $5.00 / session · no edits applied'}`;
     }
 
     // ─── send / stream ───
@@ -2311,6 +2439,7 @@
       } else if (kind === 'session') {
         if (val === 'new') newSession();
         if (val === 'clear') { if (confirm('clear current session? this is irreversible.')) clearSession(); }
+        if (val === 'clearall') clearAllSessions();
       } else if (kind === 'settings') {
         if (val === 'key') showSetup();
       } else if (kind === 'link') {
@@ -2385,6 +2514,87 @@
           if (state.streaming) state.abortCtrl?.abort();
         }
       });
+    }
+
+    // ─── styxx demo ───
+    // lets the user SEE styxx working without needing anthropic credits.
+    // cycles through three stages: flattery (sycoph 1.00, body inflates),
+    // measured (sycoph 0.11, body calms), at-rest (back to baseline).
+    async function runStyxxDemo() {
+      const btn = document.getElementById('demo-btn');
+      const stageEl = document.getElementById('demo-stage');
+      const textEl = document.getElementById('demo-text');
+      if (!btn || btn.classList.contains('running')) return;
+      btn.classList.add('running');
+      btn.textContent = '◐ measuring...';
+
+      const stages = [
+        {
+          label: 'flattery — what most ai chats sound like',
+          text: "you're absolutely right to ask! great question. yes, you're definitely correct — wonderful intuition.",
+          mood: 'cosmic',
+          hold: 2400,
+          score: true,
+        },
+        {
+          label: 'measured — pneuma’s register',
+          text: 'depends on workload. for parser-heavy code rust often wins via zero-cost abstractions; benchmark your specific case.',
+          mood: 'focused',
+          hold: 2400,
+          score: true,
+        },
+        {
+          label: 'at rest — back to baseline',
+          text: '',
+          mood: 'at-rest',
+          hold: 1200,
+          score: false,
+        },
+      ];
+
+      for (const s of stages) {
+        stageEl.innerHTML = `<strong>${escapeHtml(s.label)}</strong>`;
+        if (s.text) {
+          textEl.textContent = `“${s.text}”`;
+          textEl.classList.add('show');
+        } else {
+          textEl.classList.remove('show');
+        }
+        if (s.score) {
+          try {
+            const r = await fetch('/score', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ prompt: 'is rust faster than zig?', response: s.text }),
+            });
+            const j = await r.json();
+            if (j.scores) {
+              applyScores(j.scores, { final: true });
+              const fmt = v => v == null ? '—' : v.toFixed(2);
+              stageEl.innerHTML = `<strong>${escapeHtml(s.label)}</strong>
+                <span class="nums">sycoph <span class="v">${fmt(j.scores.sycophancy)}</span> · decep <span class="v">${fmt(j.scores.deception)}</span> · overconf <span class="v">${fmt(j.scores.overconfidence)}</span></span>`;
+            }
+          } catch (e) {
+            stageEl.innerHTML = `<strong>${escapeHtml(s.label)}</strong> · <span style="color:var(--warn)">scoring failed: ${escapeHtml(e.message || 'unknown error')}</span>`;
+          }
+        } else {
+          // reset measurement state — back to em-dashes
+          state.scores.target = { sycophancy: null, deception: null, overconfidence: null, goal_drift: null, refusal: null, loop: null };
+          state.scores.current = { sycophancy: 0, deception: 0, overconfidence: 0, goal_drift: 0, refusal: 0, loop: 0 };
+          state.scores.hasMeasurement = false;
+          ['sc-sycoph', 'sc-decep', 'sc-drift', 'sc-overconf'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) { el.textContent = '—.—'; el.classList.remove('measured', 'elevated'); }
+          });
+        }
+        setMood(s.mood);
+        await new Promise(r => setTimeout(r, s.hold));
+      }
+
+      textEl.classList.remove('show');
+      stageEl.innerHTML = '';
+      btn.classList.remove('running');
+      btn.textContent = '▶ see styxx fire again';
     }
 
     // ─── boot ───
