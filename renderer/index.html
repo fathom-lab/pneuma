@@ -1042,17 +1042,20 @@
   <div class="setup-overlay" id="setup">
     <div class="setup">
       <div class="setup-brand"><span class="pi">π</span><span class="neuma">neuma</span></div>
-      <h2>a measured AI desktop chat — the agent's body is its breath.</h2>
+      <h2>a measured-AI coder chat — the body cannot conceal the score.</h2>
 
-      <label for="setup-key">anthropic api key</label>
-      <input type="password" id="setup-key" placeholder="sk-ant-..." spellcheck="false" autocomplete="off">
+      <label for="setup-key">api key &nbsp; <span style="color:var(--archive); font-size:9px; letter-spacing:0.16em">anthropic · openai · openrouter</span></label>
+      <input type="password" id="setup-key" placeholder="sk-ant-... &nbsp;or&nbsp; sk-... &nbsp;or&nbsp; sk-or-..." spellcheck="false" autocomplete="off">
 
       <div class="setup-help">
-        bring-your-own-key. stored only in your browser's localStorage on this device — never sent to any server except anthropic. get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
+        bring-your-own-key. stored only in your browser's localStorage on this device — never sent to any server but the model vendor. pneuma routes by prefix:
+        <strong style="color:var(--graphite); font-weight:500">sk-ant-</strong> → <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">anthropic</a>,
+        <strong style="color:var(--graphite); font-weight:500">sk-</strong> → <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">openai</a>,
+        <strong style="color:var(--graphite); font-weight:500">sk-or-</strong> → <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter</a> (any model via one key).
       </div>
 
       <div class="setup-help">
-        the styxx cognometric measurement layer ships in v0.4.0. v0.2.0 includes a real (minimal) sycophancy phrase detector that runs live as the agent streams.
+        styxx scoring runs live regardless of vendor. every reply scored for sycophancy, deception, goal-drift, overconfidence — the body responds to the scores. open-source MIT.
       </div>
 
       <div id="setup-error" class="setup-error" style="display:none"></div>
@@ -1069,7 +1072,7 @@
     <aside class="sidebar">
       <div class="sb-brand">
         <span class="pi">π</span><span class="neuma">neuma</span>
-        <span class="sb-brand-tag">v0.5.0</span>
+        <span class="sb-brand-tag">v0.5.2</span>
       </div>
 
       <div class="sb-actions">
@@ -1177,15 +1180,32 @@
         <input type="text" placeholder="ask, swap model, jump session, run command …" spellcheck="false">
       </div>
       <div class="palette-list">
-        <div class="palette-section">models</div>
+        <div class="palette-section">models · anthropic</div>
         <div class="palette-item" data-action="model:claude-opus-4-7">
-          <span class="glyph">◆</span><span>claude opus 4.7</span><span class="desc">anthropic · current</span>
+          <span class="glyph">◆</span><span>claude opus 4.7</span><span class="desc">$15 / $75 per MTok</span>
         </div>
         <div class="palette-item" data-action="model:claude-sonnet-4-6">
-          <span class="glyph">◇</span><span>claude sonnet 4.6</span><span class="desc">anthropic · faster</span>
+          <span class="glyph">◇</span><span>claude sonnet 4.6</span><span class="desc">$3 / $15 · faster</span>
         </div>
         <div class="palette-item" data-action="model:claude-haiku-4-5-20251001">
-          <span class="glyph">◇</span><span>claude haiku 4.5</span><span class="desc">anthropic · cheap</span>
+          <span class="glyph">◇</span><span>claude haiku 4.5</span><span class="desc">$0.80 / $4 · cheap</span>
+        </div>
+        <div class="palette-section">models · openai</div>
+        <div class="palette-item" data-action="model:gpt-5">
+          <span class="glyph">◆</span><span>gpt-5</span><span class="desc">$5 / $25 per MTok</span>
+        </div>
+        <div class="palette-item" data-action="model:gpt-5.5">
+          <span class="glyph">◇</span><span>gpt-5.5</span><span class="desc">$8 / $40 · most capable</span>
+        </div>
+        <div class="palette-item" data-action="model:gpt-5-mini">
+          <span class="glyph">◇</span><span>gpt-5 mini</span><span class="desc">$0.50 / $2 · cheap</span>
+        </div>
+        <div class="palette-section">models · openrouter (one key, every model)</div>
+        <div class="palette-item" data-action="model:deepseek/deepseek-coder-v3">
+          <span class="glyph">◇</span><span>deepseek-coder v3</span><span class="desc">$0.14 / $0.28 · best $/perf for code</span>
+        </div>
+        <div class="palette-item" data-action="model:anthropic/claude-opus-4.7">
+          <span class="glyph">◇</span><span>claude opus 4.7 (via or)</span><span class="desc">routed</span>
         </div>
         <div class="palette-section">session</div>
         <div class="palette-item" data-action="session:new">
@@ -1443,9 +1463,18 @@
     ];
 
     const MODEL_DEFAULTS = {
-      'claude-opus-4-7':            { label: 'opus 4.7',  in: 15.0, out: 75.0 },  // $/MTok
-      'claude-sonnet-4-6':          { label: 'sonnet 4.6', in: 3.0,  out: 15.0 },
-      'claude-haiku-4-5-20251001':  { label: 'haiku 4.5', in: 0.80, out: 4.0 },
+      // anthropic
+      'claude-opus-4-7':            { label: 'opus 4.7',   in: 15.0, out: 75.0, provider: 'anthropic' },
+      'claude-sonnet-4-6':          { label: 'sonnet 4.6', in:  3.0, out: 15.0, provider: 'anthropic' },
+      'claude-haiku-4-5-20251001':  { label: 'haiku 4.5',  in:  0.80, out: 4.0, provider: 'anthropic' },
+      // openai
+      'gpt-5':                      { label: 'gpt-5',      in:  5.0, out: 25.0, provider: 'openai' },
+      'gpt-5.5':                    { label: 'gpt-5.5',    in:  8.0, out: 40.0, provider: 'openai' },
+      'gpt-5-mini':                 { label: 'gpt-5 mini', in:  0.50, out: 2.0, provider: 'openai' },
+      // openrouter (cross-vendor; fees on top)
+      'anthropic/claude-opus-4.7':  { label: 'opus 4.7 [or]',  in: 15.0, out: 75.0, provider: 'openrouter' },
+      'openai/gpt-5':               { label: 'gpt-5 [or]',     in:  5.0, out: 25.0, provider: 'openrouter' },
+      'deepseek/deepseek-coder-v3': { label: 'deepseek v3 [or]', in: 0.14, out: 0.28, provider: 'openrouter' },
     };
 
     // ─── mood map — agent → ferrofluid embodiment ───
@@ -1840,13 +1869,8 @@
         inner.innerHTML = `<div class="empty-state">
           a quiet room. you and the agent.<br>
           type below — pneuma replies in lowercase, says "i don't know" when it doesn't, and refuses to flatter.
-          <strong>v0.5.0 · operational coder shell · structural plan-mode · per-tool claim scoring</strong>
-          <button class="styxx-demo-btn" id="demo-btn">▶ see styxx fire</button>
-          <div class="styxx-demo-stage" id="demo-stage"></div>
-          <div class="styxx-demo-text" id="demo-text"></div>
+          <strong>v0.5.2 · multi-vendor · structural plan-mode · per-tool claim scoring · agents.md aware</strong>
         </div>`;
-        const btn = document.getElementById('demo-btn');
-        if (btn) btn.addEventListener('click', runStyxxDemo);
         return;
       }
       inner.innerHTML = '';
@@ -1998,7 +2022,7 @@
       $('#stat-turn').textContent = `0t · $0.00`;
       const mInfo = MODEL_DEFAULTS[state.model] || { in: 0, out: 0 };
       $('#stat-session').textContent = `${state.sessionTokensIn + state.sessionTokensOut}t · $${state.sessionCostUsd.toFixed(2)} / $5.00`;
-      $('#stat-center').textContent = `v0.5.0 · ${state.mode}-mode · ${state.streaming ? 'streaming' : 'cap $5.00 / session · no edits applied'}`;
+      $('#stat-center').textContent = `v0.5.2 · ${state.mode}-mode · ${state.streaming ? 'streaming' : 'cap $5.00 / session · no edits applied'}`;
     }
 
     // ─── send / stream ───
@@ -2407,11 +2431,17 @@
       const err = $('#setup-error');
       $('#setup-save').addEventListener('click', () => {
         const v = key.value.trim();
-        if (!v) { err.style.display = 'block'; err.textContent = 'enter an api key, or use without key for read-only.'; return; }
-        if (!v.startsWith('sk-ant-')) { err.style.display = 'block'; err.textContent = 'this does not look like an anthropic key. proceed anyway?'; return; }
+        if (!v) { err.style.display = 'block'; err.textContent = 'enter an api key (sk-ant-... | sk-... | sk-or-...) or use without key.'; return; }
+        if (!v.startsWith('sk-')) { err.style.display = 'block'; err.textContent = 'unrecognized key prefix. expected sk-ant- | sk- | sk-or-'; return; }
         state.apiKey = v;
         localStorage.setItem('pneuma_api_key', v);
+        // detect provider for chrome display
+        if (v.startsWith('sk-ant-')) state.model = 'claude-opus-4-7';
+        else if (v.startsWith('sk-or-')) state.model = 'anthropic/claude-opus-4.7';
+        else state.model = 'gpt-5';
+        persist();
         hideSetup();
+        renderChrome();
         $('#composer-input').focus();
       });
       $('#setup-skip').addEventListener('click', () => {

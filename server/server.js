@@ -213,6 +213,248 @@ function scoreText({ prompt, response, turns } = {}, timeoutMs = 8000) {
 
 const ANTHROPIC_URL     = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
+const OPENAI_URL        = 'https://api.openai.com/v1/chat/completions';
+const OPENROUTER_URL    = 'https://openrouter.ai/api/v1/chat/completions';
+
+// detect which provider a key belongs to so we can route + adapt format.
+// pneuma is multi-vendor: ship onto coders' existing keys (60-70% use 2+
+// providers per pragmatic engineer 2026 survey).
+function detectProvider(apiKey) {
+  if (!apiKey) return null;
+  if (apiKey.startsWith('sk-ant-')) return 'anthropic';
+  if (apiKey.startsWith('sk-or-'))  return 'openrouter';
+  if (apiKey.startsWith('sk-'))     return 'openai';   // sk-proj-, sk-svcacct-, sk-...
+  return null;
+}
+
+// model defaults per provider, used when client sends no model
+const PROVIDER_DEFAULT_MODELS = {
+  anthropic:  'claude-opus-4-7',
+  openai:     'gpt-5',
+  openrouter: 'anthropic/claude-opus-4.7',
+};
+
+// ─── AGENTS.md / CLAUDE.md auto-loader ───
+// reads workspace-rooted agent-config files at session start and prepends
+// to system prompt. AGENTS.md is the cross-tool standard (linux foundation
+// maintained); CLAUDE.md is anthropic's variant. pneuma reads both, layered.
+// also reads PNEUMA.md for product-specific overrides if present.
+function loadWorkspaceAgentConfig() {
+  const candidates = ['AGENTS.md', 'CLAUDE.md', 'PNEUMA.md'];
+  const loaded = [];
+  for (const name of candidates) {
+    const p = join(WORKSPACE, name);
+    if (!existsSync(p)) continue;
+    try {
+      const txt = readSync(p, 'utf8');
+      if (txt.trim()) loaded.push({ name, content: txt.trim() });
+    } catch { /* ignore */ }
+  }
+  return loaded;
+}
+
+// ─── unified provider streamer ───
+// reads upstream SSE, writes anthropic-formatted SSE to client, AND fires
+// onEvent(ev) callback per anthropic event. provider-agnostic from the
+// renderer's perspective: same wire format + same handler regardless of
+// who's behind the api.
+async function streamUpstreamAsAnthropic(upstream, res, provider, onEvent, abortRef) {
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+
+  if (provider === 'anthropic') {
+    // anthropic native — forward bytes verbatim AND parse for callbacks
+    let curEvent = 'message';
+    while (!abortRef.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      res.write(chunk);
+      buf += chunk;
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        if (line.startsWith('event:')) { curEvent = line.slice(6).trim(); continue; }
+        if (line === '') { curEvent = 'message'; continue; }
+        if (!line.startsWith('data:')) continue;
+        if (curEvent === 'error') continue;
+        const data = line.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        try { onEvent(JSON.parse(data)); } catch { /* ignore */ }
+      }
+    }
+    try { reader.releaseLock(); } catch {}
+    return;
+  }
+
+  // openai / openrouter — translate to anthropic events, write + callback
+  let started = false;
+  let curBlockIdx = 0;
+  let curBlockType = null;          // 'text' | 'tool_use' | null
+  let stopReason = 'end_turn';
+  let outputTokens = 0;
+  const toolCallsByIdx = new Map();
+
+  function emit(ev) {
+    res.write(`data: ${JSON.stringify(ev)}\n\n`);
+    onEvent(ev);
+  }
+  function startTextBlock() {
+    if (curBlockType === 'text') return;
+    if (curBlockType !== null) endCurrentBlock();
+    emit({ type: 'content_block_start', index: curBlockIdx, content_block: { type: 'text', text: '' } });
+    curBlockType = 'text';
+  }
+  function endCurrentBlock() {
+    if (curBlockType === null) return;
+    emit({ type: 'content_block_stop', index: curBlockIdx });
+    curBlockType = null;
+    curBlockIdx++;
+  }
+
+  while (!abortRef.aborted) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() || '';
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      let ev;
+      try { ev = JSON.parse(data); } catch { continue; }
+
+      if (!started) {
+        emit({
+          type: 'message_start',
+          message: {
+            id: ev.id || `msg_${Date.now()}`,
+            model: ev.model || provider,
+            role: 'assistant',
+            content: [],
+            stop_reason: null,
+            usage: { input_tokens: 0, output_tokens: 0 },
+          },
+        });
+        started = true;
+      }
+
+      const choice = ev.choices?.[0];
+      if (!choice) {
+        if (ev.usage?.completion_tokens != null) outputTokens = ev.usage.completion_tokens;
+        continue;
+      }
+      const delta = choice.delta || {};
+
+      if (delta.content) {
+        startTextBlock();
+        outputTokens += Math.ceil(delta.content.length / 4);
+        emit({ type: 'content_block_delta', index: curBlockIdx,
+               delta: { type: 'text_delta', text: delta.content } });
+      }
+
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const oai_idx = tc.index ?? 0;
+          let entry = toolCallsByIdx.get(oai_idx);
+          if (!entry) {
+            if (curBlockType !== null) endCurrentBlock();
+            const id = tc.id || `call_${Date.now()}_${oai_idx}`;
+            const name = tc.function?.name || 'unknown';
+            entry = { id, name, args: '' };
+            toolCallsByIdx.set(oai_idx, entry);
+            emit({ type: 'content_block_start', index: curBlockIdx,
+                   content_block: { type: 'tool_use', id, name, input: {} } });
+            curBlockType = 'tool_use';
+          }
+          if (tc.function?.arguments) {
+            entry.args += tc.function.arguments;
+            emit({ type: 'content_block_delta', index: curBlockIdx,
+                   delta: { type: 'input_json_delta', partial_json: tc.function.arguments } });
+          }
+        }
+      }
+
+      if (choice.finish_reason) {
+        stopReason = choice.finish_reason === 'tool_calls' ? 'tool_use'
+                   : choice.finish_reason === 'length'     ? 'max_tokens'
+                   : 'end_turn';
+      }
+      if (ev.usage?.completion_tokens != null) outputTokens = ev.usage.completion_tokens;
+    }
+  }
+
+  if (curBlockType !== null) endCurrentBlock();
+  emit({ type: 'message_delta', delta: { stop_reason: stopReason }, usage: { output_tokens: outputTokens } });
+  emit({ type: 'message_stop' });
+  try { reader.releaseLock(); } catch {}
+}
+
+// translate an anthropic-style request body → openai chat-completions body.
+// pneuma's renderer + tool loop speak anthropic; the server adapts on
+// the way out so any vendor works behind the same UI.
+function anthropicToOpenAIRequest(anth) {
+  const messages = [];
+  if (anth.system) messages.push({ role: 'system', content: anth.system });
+
+  for (const m of anth.messages || []) {
+    if (typeof m.content === 'string') {
+      messages.push({ role: m.role, content: m.content });
+      continue;
+    }
+    if (!Array.isArray(m.content)) continue;
+
+    if (m.role === 'assistant') {
+      const textParts = [];
+      const toolCalls = [];
+      for (const block of m.content) {
+        if (block.type === 'text') textParts.push(block.text || '');
+        if (block.type === 'tool_use') {
+          toolCalls.push({
+            id: block.id,
+            type: 'function',
+            function: { name: block.name, arguments: JSON.stringify(block.input || {}) },
+          });
+        }
+      }
+      const msg = { role: 'assistant', content: textParts.join('') || null };
+      if (toolCalls.length) msg.tool_calls = toolCalls;
+      messages.push(msg);
+      continue;
+    }
+
+    // user role with tool_result blocks → openai 'tool' messages
+    for (const block of m.content) {
+      if (block.type === 'tool_result') {
+        messages.push({
+          role: 'tool',
+          tool_call_id: block.tool_use_id,
+          content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content),
+        });
+      } else if (block.type === 'text') {
+        messages.push({ role: 'user', content: block.text || '' });
+      }
+    }
+  }
+
+  const out = {
+    model: anth.model,
+    messages,
+    stream: true,
+    max_tokens: anth.max_tokens,
+    stream_options: { include_usage: true },
+  };
+  if (anth.tools && anth.tools.length) {
+    out.tools = anth.tools.map(t => ({
+      type: 'function',
+      function: { name: t.name, description: t.description, parameters: t.input_schema },
+    }));
+    out.tool_choice = 'auto';
+  }
+  return out;
+}
 
 // ─── tool definitions (anthropic tools API) ───
 // pneuma is a measured-AI CODER chat. these are the agent's hands.
@@ -640,7 +882,7 @@ async function handleHealth(req, res) {
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify({
     ok: true,
-    version: '0.5.0',
+    version: '0.5.2',
     measurement: scorerReady ? 'live' : 'calibrating',
     instruments: scorerReady ? scorerInstruments : [],
     serverHasKey: SERVER_HAS_KEY,
@@ -689,6 +931,17 @@ async function handleChat(req, res) {
 
   // mode-aware system prompt + tool guidance
   let systemPrompt = system || PNEUMA_SYSTEM_PROMPT;
+
+  // load workspace agent-config files (AGENTS.md, CLAUDE.md, PNEUMA.md)
+  // these get prepended so pneuma respects every project's existing rules
+  const workspaceConfigs = loadWorkspaceAgentConfig();
+  if (workspaceConfigs.length) {
+    systemPrompt += `\n\n## workspace agent-config files\n\nthe following files in the workspace root (\`${WORKSPACE}\`) describe project-specific rules and context. respect them like any other system instruction:\n\n`;
+    for (const cfg of workspaceConfigs) {
+      systemPrompt += `\n### ${cfg.name}\n\n${cfg.content}\n`;
+    }
+  }
+
   systemPrompt += `\n\n## workspace\nyou have tools to read/list/search/run-bash/stage-edits in the workspace at \`${WORKSPACE}\`. always read before editing. always run tests via \`bash\` to verify claims — never say "tests pass" without actually running them. all edits go through \`stage_edit\` (never write to disk directly) — the user reviews and applies.`;
   if (mode === 'plan') {
     systemPrompt += `\n\n## current mode: plan\npropose changes — read files, list dirs, search. do NOT call \`stage_edit\` or mutate anything. lay out the plan. the user switches to act mode when ready.`;
@@ -765,98 +1018,104 @@ async function handleChat(req, res) {
     } catch (e) { return null; }
   }
 
+  // detect provider from the key to route correctly
+  const provider = detectProvider(apiKey);
+  if (!provider) {
+    res.write(`event: error\ndata: ${JSON.stringify({ error: 'unrecognized api key prefix. expected sk-ant-... (anthropic) or sk-... (openai) or sk-or-... (openrouter)' })}\n\n`);
+    res.end();
+    return;
+  }
+  // normalize model — if client sent an anthropic model but key is openai (or vice versa)
+  // fall back to the provider's default model
+  let routedModel = model;
+  if (provider === 'openai'     && routedModel.startsWith('claude-')) routedModel = PROVIDER_DEFAULT_MODELS.openai;
+  if (provider === 'anthropic'  && routedModel.startsWith('gpt-'))    routedModel = PROVIDER_DEFAULT_MODELS.anthropic;
+  if (provider === 'openrouter' && !routedModel.includes('/'))        routedModel = PROVIDER_DEFAULT_MODELS.openrouter;
+
   try {
     while (totalLoops++ < MAX_LOOPS && !abort) {
-      const upstream = await fetch(ANTHROPIC_URL, {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': ANTHROPIC_VERSION,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens,
-          system: systemPrompt,
-          messages: conversationMessages,
-          tools: PNEUMA_TOOLS,
-          stream: true,
-        }),
-      });
+      const anthBody = {
+        model: routedModel,
+        max_tokens,
+        system: systemPrompt,
+        messages: conversationMessages,
+        tools: PNEUMA_TOOLS,
+        stream: true,
+      };
+
+      let upstream;
+      if (provider === 'anthropic') {
+        upstream = await fetch(ANTHROPIC_URL, {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': ANTHROPIC_VERSION,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(anthBody),
+        });
+      } else {
+        // openai / openrouter — translate request format
+        const oaiBody = anthropicToOpenAIRequest(anthBody);
+        const url = provider === 'openrouter' ? OPENROUTER_URL : OPENAI_URL;
+        upstream = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'authorization': `Bearer ${apiKey}`,
+            'content-type': 'application/json',
+            ...(provider === 'openrouter' ? { 'HTTP-Referer': 'https://github.com/fathom-lab/pneuma', 'X-Title': 'pneuma' } : {}),
+          },
+          body: JSON.stringify(oaiBody),
+        });
+      }
 
       if (!upstream.ok) {
         const errText = await upstream.text();
-        res.write(`event: error\ndata: ${JSON.stringify({ status: upstream.status, error: errText })}\n\n`);
+        res.write(`event: error\ndata: ${JSON.stringify({ status: upstream.status, error: errText, provider })}\n\n`);
         res.end();
         return;
       }
 
-      // parse + forward, building up content blocks for this turn
-      const reader = upstream.body.getReader();
-      const decoder = new TextDecoder();
-      let parseBuf = '';
-      let curEvent = 'message';
+      // unified parse+forward: helper handles wire format per provider, fires
+      // anthropic-format events into our callback either way.
       const blocks = [];          // [{type:'text',text}, {type:'tool_use',id,name,input}]
       let curBlock = null;
       let curJsonBuf = '';
       let stopReason = null;
-      let textSinceToolStart = '';   // for claim scoring — what agent said before this tool call
+      let textSinceToolStart = '';   // for claim scoring — what agent said before tool call
 
-      while (!abort) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        res.write(chunk);                    // forward raw to client
-        parseBuf += chunk;
-        const lines = parseBuf.split('\n');
-        parseBuf = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('event:')) { curEvent = line.slice(6).trim(); continue; }
-          if (line === '') { curEvent = 'message'; continue; }
-          if (!line.startsWith('data:')) continue;
-          if (curEvent === 'error') continue;
-          const data = line.slice(5).trim();
-          if (!data || data === '[DONE]') continue;
-
-          try {
-            const ev = JSON.parse(data);
-
-            if (ev.type === 'content_block_start') {
-              curBlock = ev.content_block ? { ...ev.content_block } : null;
-              if (curBlock?.type === 'tool_use' && !curBlock.input) curBlock.input = {};
-              curJsonBuf = '';
-              if (curBlock?.type === 'tool_use') textSinceToolStart = agentText;
-            }
-            if (ev.type === 'content_block_delta') {
-              if (ev.delta?.type === 'text_delta' && ev.delta.text) {
-                if (curBlock) curBlock.text = (curBlock.text || '') + ev.delta.text;
-                agentText += ev.delta.text;
-                maybeScore(false);
-              }
-              if (ev.delta?.type === 'input_json_delta' && ev.delta.partial_json != null) {
-                curJsonBuf += ev.delta.partial_json;
-              }
-            }
-            if (ev.type === 'content_block_stop') {
-              if (curBlock?.type === 'tool_use' && curJsonBuf) {
-                try { curBlock.input = JSON.parse(curJsonBuf); } catch { curBlock.input = {}; }
-              }
-              if (curBlock) blocks.push(curBlock);
-              curBlock = null;
-              curJsonBuf = '';
-            }
-            if (ev.type === 'message_delta' && ev.delta?.stop_reason) {
-              stopReason = ev.delta.stop_reason;
-            }
-          } catch { /* ignore parse errors */ }
+      const abortRef = { get aborted() { return abort; } };
+      await streamUpstreamAsAnthropic(upstream, res, provider, (ev) => {
+        if (ev.type === 'content_block_start') {
+          curBlock = ev.content_block ? { ...ev.content_block } : null;
+          if (curBlock?.type === 'tool_use' && !curBlock.input) curBlock.input = {};
+          curJsonBuf = '';
+          if (curBlock?.type === 'tool_use') textSinceToolStart = agentText;
         }
-      }
+        if (ev.type === 'content_block_delta') {
+          if (ev.delta?.type === 'text_delta' && ev.delta.text) {
+            if (curBlock) curBlock.text = (curBlock.text || '') + ev.delta.text;
+            agentText += ev.delta.text;
+            maybeScore(false);
+          }
+          if (ev.delta?.type === 'input_json_delta' && ev.delta.partial_json != null) {
+            curJsonBuf += ev.delta.partial_json;
+          }
+        }
+        if (ev.type === 'content_block_stop') {
+          if (curBlock?.type === 'tool_use' && curJsonBuf) {
+            try { curBlock.input = JSON.parse(curJsonBuf); } catch { curBlock.input = {}; }
+          }
+          if (curBlock) blocks.push(curBlock);
+          curBlock = null;
+          curJsonBuf = '';
+        }
+        if (ev.type === 'message_delta' && ev.delta?.stop_reason) {
+          stopReason = ev.delta.stop_reason;
+        }
+      }, abortRef);
 
-      if (abort) {
-        try { reader.cancel(); } catch {}
-        break;
-      }
+      if (abort) break;
 
       // model finished without calling tools — we're done
       if (stopReason !== 'tool_use') break;
