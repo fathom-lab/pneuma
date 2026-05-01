@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>π neuma</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0A0A0A">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400;1,8..60,500;1,8..60,600&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /* ─────────────────────────────────────────────
+     pneuma — v0.1.0 empty state
+     the alien-tech test. one screen.
+     ───────────────────────────────────────────── */
+
+  :root {
+    --paper:    #0A0A0A;
+    --ink:      #F4EFE6;
+    --graphite: #9F9890;
+    --rule:     #1F1F1F;
+    --pale:     #141210;
+    --archive:  #585450;
+    --signal:   #C8A86B;
+
+    --serif: "Source Serif 4", Iowan Old Style, Georgia, serif;
+    --sans:  "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono:  "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+    --ease: cubic-bezier(.16, 1, .3, 1);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-feature-settings: "liga" 1, "kern" 1, "dlig" 1, "onum" 1;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    cursor: default;
+  }
+
+  /* ─── room texture (faint cognometric grain) ─── */
+  /* the empty-state portrait. just a hint that memory exists.
+     future versions paint into this canvas as conversations accrue. */
+  .room-texture {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.6;
+  }
+
+  /* ─── the room (layout) ─── */
+  .room {
+    position: relative;
+    z-index: 1;
+    height: 100%;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    align-items: center;
+    justify-items: center;
+  }
+
+  /* ─── threshold (the pneuma made visible) ─── */
+  .threshold {
+    padding: 38px 0 18px;
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.32em;
+    color: var(--signal);
+    opacity: 0.42;
+    display: flex;
+    gap: 3px;
+    transition: opacity 800ms var(--ease);
+  }
+  .room.attentive .threshold { opacity: 0.72; }
+  .threshold span {
+    display: inline-block;
+    transform-origin: center bottom;
+    animation: breath 6s ease-in-out infinite;
+  }
+  @keyframes breath {
+    0%, 100% { transform: scaleY(0.42); opacity: 0.4; }
+    50%      { transform: scaleY(1);    opacity: 0.95; }
+  }
+  .threshold span:nth-child(1)  { animation-delay: 0s; }
+  .threshold span:nth-child(2)  { animation-delay: 0.15s; }
+  .threshold span:nth-child(3)  { animation-delay: 0.30s; }
+  .threshold span:nth-child(4)  { animation-delay: 0.45s; }
+  .threshold span:nth-child(5)  { animation-delay: 0.60s; }
+  .threshold span:nth-child(6)  { animation-delay: 0.75s; }
+  .threshold span:nth-child(7)  { animation-delay: 0.90s; }
+  .threshold span:nth-child(8)  { animation-delay: 1.05s; }
+  .threshold span:nth-child(9)  { animation-delay: 1.20s; }
+  .threshold span:nth-child(10) { animation-delay: 1.35s; }
+  .threshold span:nth-child(11) { animation-delay: 1.50s; }
+  .threshold span:nth-child(12) { animation-delay: 1.65s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .threshold span { animation: none; transform: scaleY(0.7); opacity: 0.6; }
+  }
+
+  /* ─── alcove (where the alien lives) ─── */
+  .alcove {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+    transform: translateY(-1.5vh);
+    transition: transform 700ms var(--ease);
+  }
+  .room.attentive .alcove { transform: translateY(-2.5vh); }
+
+  .alien-wrap {
+    position: relative;
+    width: 220px;
+    height: 320px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .alien {
+    width: 100%;
+    height: 100%;
+    -webkit-mask-image: linear-gradient(180deg, black 0%, black 78%, transparent 100%);
+            mask-image: linear-gradient(180deg, black 0%, black 78%, transparent 100%);
+    transition: filter 700ms var(--ease);
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.42));
+  }
+  .alien path,
+  .alien ellipse,
+  .alien line,
+  .alien circle {
+    stroke: var(--ink);
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .alien .aura {
+    fill: var(--signal);
+    stroke: none;
+    opacity: 0.045;
+    transition: opacity 800ms var(--ease);
+  }
+  .room.attentive .alien .aura { opacity: 0.095; }
+  .alien .third-eye { opacity: 0.45; }
+
+  .alien .eyes-closed { transition: opacity 600ms var(--ease); }
+  .alien .eyes-open {
+    opacity: 0;
+    transition: opacity 600ms var(--ease);
+    fill: var(--ink);
+    stroke: none;
+  }
+  .room.attentive .alien .eyes-closed { opacity: 0; }
+  .room.attentive .alien .eyes-open   { opacity: 1; }
+
+  .alien .chest {
+    transform-origin: 100px 200px;
+    animation: chest 5s ease-in-out infinite;
+  }
+  .room.attentive .alien .chest { animation-duration: 3.6s; }
+  @keyframes chest {
+    0%, 100% { transform: scale(1, 1); }
+    50%      { transform: scale(1.022, 1.018); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .alien .chest { animation: none; }
+  }
+
+  /* ─── floor line ─── */
+  .floor {
+    width: min(900px, 80vw);
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      var(--ink) 24%,
+      var(--ink) 76%,
+      transparent 100%);
+    opacity: 0.22;
+  }
+
+  /* ─── composer ─── */
+  .composer {
+    width: min(720px, 86vw);
+    padding-top: 24px;
+    padding-bottom: 56px;
+  }
+  .composer-rule {
+    width: 100%;
+    height: 1px;
+    background: var(--rule);
+    margin-bottom: 14px;
+    opacity: 0.7;
+  }
+  .composer input {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 19px;
+    line-height: 1.5;
+    text-align: center;
+    letter-spacing: 0.005em;
+    caret-color: var(--signal);
+  }
+  .composer input::placeholder {
+    color: var(--archive);
+    font-style: italic;
+    letter-spacing: 0.5em;
+    text-indent: 0.5em;
+  }
+  .composer input:focus::placeholder {
+    color: #2a2725;
+  }
+
+  /* ─── settings dot (top-right, single dot) ─── */
+  .settings-dot {
+    position: fixed;
+    top: 22px;
+    right: 22px;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--graphite);
+    opacity: 0.32;
+    z-index: 10;
+    cursor: pointer;
+    transition: opacity 200ms var(--ease);
+  }
+  .settings-dot:hover { opacity: 0.72; }
+
+  /* ─── π neuma wordmark (bottom-left, signature-quiet) ─── */
+  .wordmark {
+    position: fixed;
+    bottom: 18px;
+    left: 22px;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    z-index: 10;
+    user-select: none;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 1px;
+  }
+  .wordmark .pi {
+    color: var(--signal);
+    font-weight: 500;
+    font-size: 15px;
+    line-height: 1;
+    margin-right: 2px;
+  }
+  .wordmark .neuma {
+    color: var(--ink);
+    opacity: 0.55;
+    transition: opacity 400ms var(--ease);
+  }
+  .wordmark:hover .neuma { opacity: 0.85; }
+</style>
+</head>
+<body>
+  <canvas class="room-texture"></canvas>
+
+  <div class="settings-dot" aria-label="settings"></div>
+  <div class="wordmark" aria-label="pneuma">
+    <span class="pi">π</span><span class="neuma">neuma</span>
+  </div>
+
+  <div class="room">
+    <!-- the pneuma — breath at the threshold -->
+    <div class="threshold" aria-label="pneuma">
+      <span>▁</span><span>▂</span><span>▃</span><span>▅</span><span>▆</span><span>█</span><span>▇</span><span>▅</span><span>▃</span><span>▂</span><span>▁</span><span>▂</span>
+    </div>
+
+    <!-- alcove — the alien at rest -->
+    <div class="alcove">
+      <div class="alien-wrap">
+        <svg class="alien" viewBox="0 0 200 320" aria-label="agent at rest">
+          <!-- aura -->
+          <ellipse class="aura" cx="100" cy="160" rx="78" ry="116"/>
+
+          <!-- head -->
+          <ellipse cx="100" cy="78" rx="36" ry="44" stroke-width="1.2"/>
+
+          <!-- closed eyes -->
+          <g class="eyes-closed">
+            <path d="M 80 80 Q 88 77 96 80" stroke-width="1.2"/>
+            <path d="M 104 80 Q 112 77 120 80" stroke-width="1.2"/>
+          </g>
+          <!-- open eyes (revealed on attentive) -->
+          <g class="eyes-open">
+            <circle cx="88" cy="79" r="1.8"/>
+            <circle cx="112" cy="79" r="1.8"/>
+          </g>
+
+          <!-- third eye (closed, dimmer) -->
+          <path class="third-eye" d="M 92 56 Q 100 53 108 56" stroke-width="0.9"/>
+
+          <!-- neck -->
+          <line x1="92" y1="120" x2="89" y2="156" stroke-width="1.1"/>
+          <line x1="108" y1="120" x2="111" y2="156" stroke-width="1.1"/>
+
+          <!-- torso (breathes) -->
+          <g class="chest">
+            <path d="M 67 168 Q 100 158 133 168 L 130 240 Q 100 254 70 240 Z" stroke-width="1.2"/>
+          </g>
+
+          <!-- arms at rest -->
+          <path d="M 70 184 Q 58 210 54 252" stroke-width="1.2"/>
+          <path d="M 130 184 Q 142 210 146 252" stroke-width="1.2"/>
+        </svg>
+      </div>
+
+      <div class="floor"></div>
+    </div>
+
+    <!-- composer (one line, no chrome) -->
+    <div class="composer">
+      <div class="composer-rule"></div>
+      <input type="text" placeholder="..." spellcheck="false"
+             autocomplete="off" autocorrect="off" autocapitalize="off">
+    </div>
+  </div>
+
+  <script>
+    // ─── room texture ───────────────────────────
+    // empty state: just the faintest hint that memory exists.
+    // future versions paint into this canvas as conversations accrue.
+    const tex = document.querySelector('.room-texture');
+    const ctx = tex.getContext('2d');
+    function paintTexture() {
+      tex.width  = window.innerWidth;
+      tex.height = window.innerHeight;
+      ctx.clearRect(0, 0, tex.width, tex.height);
+      const points = Math.floor(tex.width * tex.height / 1200);
+      for (let i = 0; i < points; i++) {
+        const x = Math.random() * tex.width;
+        const y = Math.random() * tex.height;
+        const o = Math.random() * 0.04;
+        const s = Math.random() * 1.2;
+        ctx.fillStyle = `rgba(244, 239, 230, ${o})`;
+        ctx.fillRect(x, y, s, s);
+      }
+    }
+    paintTexture();
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(paintTexture, 200);
+    });
+
+    // ─── pre-cognition ─────────────────────────
+    // the alien shifts state instantly when the user attends to the composer.
+    // eyes open, aura brightens, breath quickens, alcove rises.
+    const room     = document.querySelector('.room');
+    const composer = document.querySelector('.composer input');
+    composer.addEventListener('focus', () => room.classList.add('attentive'));
+    composer.addEventListener('blur',  () => room.classList.remove('attentive'));
+
+    // anywhere-click in lower band focuses composer (room invites typing)
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.composer'))     return;
+      if (e.target.closest('.settings-dot')) return;
+      if (e.target.closest('.wordmark'))     return;
+      const lowerBand = window.innerHeight * 0.6;
+      if (e.clientY > lowerBand) composer.focus();
+    });
+
+    // Enter = pulse (placeholder for future "send")
+    composer.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        room.classList.remove('attentive');
+        setTimeout(() => composer.value && room.classList.add('attentive'), 280);
+      }
+    });
+  </script>
+</body>
+</html>
