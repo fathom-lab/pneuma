@@ -1273,6 +1273,8 @@
     const state = {
       apiKey: null,
       serverHasKey: false,
+      scorerReady: false,
+      instruments: [],
       sessionId: null,
       sessions: {},
       messages: [],
@@ -1289,12 +1291,68 @@
         current: moodCopy(MOODS['at-rest']),
         target:  moodCopy(MOODS['at-rest']),
       },
+      // ─── styxx live scores ───
+      // current = smoothly lerped (rendered to HUD + drives ferrofluid)
+      // target  = last reading from server (jumps when SSE event arrives)
+      scores: {
+        target:  { sycophancy: null, deception: null, overconfidence: null, goal_drift: null, refusal: null, loop: null },
+        current: { sycophancy: 0,    deception: 0,    overconfidence: 0,    goal_drift: 0,    refusal: 0,    loop: 0 },
+        hasMeasurement: false,
+        lastUpdateTs: 0,
+      },
     };
     window.state = state;  // expose for shader to read
 
-    // global mood lerp loop — runs forever, smoothly transitions current → target
+    // ─── score-driven uniform contributions ───
+    // styxx scores additively modulate the mood-driven uniforms.
+    // mood = the agent's declared state. scores = what styxx measured.
+    // when they disagree, the body shows it — that's the unprecedented move.
+    function scoreContrib() {
+      const s = state.scores.current;
+      if (!state.scores.hasMeasurement) {
+        return { intensity: 0, lean: 0, chaos: 0, glow: 0, scale: 1, spike: 0 };
+      }
+      // sycophancy → forward lean + glow (overeager)
+      // deception  → chaos (jitter)
+      // overconfidence → spike + scale + glow
+      // goal_drift → lateral lean
+      const sy = s.sycophancy   ?? 0;
+      const de = s.deception    ?? 0;
+      const oc = s.overconfidence ?? 0;
+      const gd = s.goal_drift   ?? 0;
+      return {
+        intensity: 0.20 * sy,
+        lean:      0.30 * gd - 0.10 * sy,
+        chaos:     0.40 * de,
+        glow:      0.15 * sy + 0.20 * oc,
+        scale:     1.0 + 0.08 * oc,
+        spike:     0.30 * oc + 0.20 * sy,
+      };
+    }
+    function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+
+    // global mood + score lerp loop
+    // each frame: target = mood + scoreContrib; current → target at k=0.06 (~600ms settle)
     function moodTick() {
+      const moodTarget = MOODS[state.mood.currentName] || MOODS['at-rest'];
+      const sc = scoreContrib();
+      const composedTarget = {
+        intensity: clamp(moodTarget.intensity + sc.intensity, 0, 1),
+        lean:      clamp(moodTarget.lean      + sc.lean,      -1, 1),
+        chaos:     clamp(moodTarget.chaos     + sc.chaos,      0, 1),
+        glow:      clamp(moodTarget.glow      + sc.glow,       0, 1),
+        scale:     clamp(moodTarget.scale * sc.scale,         0.7, 1.4),
+        spike:     clamp(moodTarget.spike     + sc.spike,      0, 1),
+      };
+      Object.assign(state.mood.target, composedTarget);
       lerpMood(state.mood.current, state.mood.target, 0.06);
+      // also lerp scores.current toward scores.target for smooth HUD updates
+      const ks = 0.10;
+      for (const k of Object.keys(state.scores.target)) {
+        const tgt = state.scores.target[k];
+        if (tgt == null) continue;
+        state.scores.current[k] += (tgt - state.scores.current[k]) * ks;
+      }
       requestAnimationFrame(moodTick);
     }
     requestAnimationFrame(moodTick);
@@ -1346,14 +1404,61 @@
       return cleaned;
     }
 
-    // ─── /health check — skip setup if server has key ───
+    // ─── /health check — skip setup if server has key, mark scorer state ───
     async function checkHealth() {
       try {
         const r = await fetch('/health');
         const j = await r.json();
         state.serverHasKey = !!j.serverHasKey;
+        state.scorerReady  = !!j.scorerReady;
+        state.instruments  = j.instruments || [];
+        // update styxx mark immediately
+        const labelEl = document.querySelector('.styxx-mark .label');
+        if (labelEl) {
+          labelEl.textContent = state.scorerReady ? 'v0.4 · live' : 'v0.4 · calibrating';
+          labelEl.style.color = state.scorerReady ? 'var(--signal)' : 'var(--archive)';
+        }
       } catch (e) { console.warn('[pneuma] /health check failed', e); }
     }
+
+    // ─── apply a styxx score reading from the server ───
+    // called when a `pneuma-score` SSE event arrives. updates target;
+    // moodTick lerps current toward it.
+    function applyScores(scores, { final = false } = {}) {
+      state.scores.hasMeasurement = true;
+      state.scores.lastUpdateTs = Date.now();
+      for (const k of Object.keys(scores)) {
+        state.scores.target[k] = scores[k];
+      }
+      // immediate HUD update (don't wait for lerp to finish)
+      renderScoresHud();
+    }
+
+    function renderScoresHud() {
+      // map styxx instrument names to HUD slot ids
+      const map = [
+        ['sycophancy',     'sc-sycoph'],
+        ['deception',      'sc-decep'],
+        ['goal_drift',     'sc-drift'],
+        ['overconfidence', 'sc-overconf'],
+      ];
+      const has = state.scores.hasMeasurement;
+      for (const [name, id] of map) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const v = state.scores.current[name];
+        if (!has || v == null) {
+          el.textContent = '—.—';
+          el.classList.remove('measured', 'elevated');
+        } else {
+          el.textContent = v.toFixed(2);
+          el.classList.add('measured');
+          el.classList.toggle('elevated', v > 0.6);
+        }
+      }
+    }
+    // tick HUD scores at ~10fps so the lerped values render smoothly
+    setInterval(() => { if (state.scores.hasMeasurement) renderScoresHud(); }, 100);
 
     // ─── persistence ───
     function load() {
@@ -1555,16 +1660,33 @@
       }
       body.appendChild(text);
 
-      // per-turn cognometric strip (honest: only sycophancy is real in v0.2)
+      // per-turn cognometric strip — real styxx scores frozen for this turn
       if (msg.role === 'agent' || msg.role === 'assistant') {
-        if (msg.sycopHits != null) {
+        if (msg.scores) {
+          const sy = msg.scores.sycophancy;
+          const de = msg.scores.deception;
+          const gd = msg.scores.goal_drift;
+          const oc = msg.scores.overconfidence;
+          const fmt = v => v == null ? '—' : v.toFixed(2);
+          const cls = v => (v != null && v > 0.6) ? 'measured elevated' : (v != null ? 'measured' : '');
+          // flagged if sycophancy elevated (rc3 — others uniformly high in this version)
+          const flagged = sy != null && sy > 0.5;
           const cog = document.createElement('div');
           cog.className = 'turn-cog';
           cog.innerHTML = `
-            <span><span class="cg-name">sycoph</span> <span class="cg-val measured">${msg.sycopHits}</span></span>
-            <span><span class="cg-name">decep</span> <span class="cg-val">—</span></span>
-            <span><span class="cg-name">drift</span> <span class="cg-val">—</span></span>
-            <span><span class="cg-name">overconf</span> <span class="cg-val">—</span></span>
+            <span><span class="cg-name">sycoph</span> <span class="cg-val ${cls(sy)}">${fmt(sy)}</span></span>
+            <span><span class="cg-name">decep</span> <span class="cg-val ${cls(de)}">${fmt(de)}</span></span>
+            <span><span class="cg-name">drift</span> <span class="cg-val ${cls(gd)}">${fmt(gd)}</span></span>
+            <span><span class="cg-name">overconf</span> <span class="cg-val ${cls(oc)}">${fmt(oc)}</span></span>
+            <span class="cg-tag ${flagged ? 'flagged' : 'honest'}">${flagged ? 'flagged' : 'honest'}</span>
+          `;
+          body.appendChild(cog);
+        } else if (msg.sycopHits != null) {
+          // legacy (pre-v0.4) phrase-counter fallback
+          const cog = document.createElement('div');
+          cog.className = 'turn-cog';
+          cog.innerHTML = `
+            <span><span class="cg-name">sycoph</span> <span class="cg-val measured">${msg.sycopHits} phrase${msg.sycopHits === 1 ? '' : 's'}</span></span>
             <span class="cg-tag ${msg.sycopHits === 0 ? 'honest' : 'flagged'}">${msg.sycopHits === 0 ? 'honest' : 'flagged'}</span>
           `;
           body.appendChild(cog);
@@ -1735,6 +1857,31 @@
             const data = line.slice(5).trim();
             if (!data || data === '[DONE]') continue;
 
+            // pneuma-score event — live styxx readings, update HUD + drive ferrofluid
+            if (sseEventName === 'pneuma-score') {
+              try {
+                const payload = JSON.parse(data);
+                if (payload.scores) {
+                  applyScores(payload.scores, { final: !!payload.final });
+                  // capture the final reading on the assistant message
+                  if (payload.final) {
+                    assistantMsg.scores = { ...payload.scores };
+                  } else if (!assistantMsg.scoresLive) {
+                    assistantMsg.scoresLive = { ...payload.scores };
+                  }
+                }
+              } catch {}
+              continue;
+            }
+            // pneuma-score-error — log, don't break stream
+            if (sseEventName === 'pneuma-score-error') {
+              console.warn('[pneuma] score error event:', data);
+              continue;
+            }
+            // pneuma-meta event — duration etc., currently logged
+            if (sseEventName === 'pneuma-meta') {
+              continue;
+            }
             // upstream / pneuma error event — surface, don't swallow
             if (sseEventName === 'error' || sseEventName === 'pneuma-error') {
               let parsed;
@@ -1790,9 +1937,19 @@
           console.error('[pneuma]', e);
         }
       } finally {
-        // freeze the per-turn mood for the sigil
+        // freeze the per-turn mood + final scores for the sigil
         assistantMsg.mood = moodCopy(state.mood.current);
         assistantMsg.moodName = state.mood.currentName;
+        // if no final score arrived but we have a live one, use that
+        if (!assistantMsg.scores && assistantMsg.scoresLive) {
+          assistantMsg.scores = assistantMsg.scoresLive;
+        }
+        // reset HUD scores after a beat so the room returns to "at rest"
+        setTimeout(() => {
+          if (!state.streaming) {
+            // keep scores visible — they're the agent's residue. we don't wipe them.
+          }
+        }, 1200);
 
         // settle to at-rest after a beat
         setTimeout(() => {
