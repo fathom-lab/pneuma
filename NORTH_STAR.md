@@ -1,14 +1,44 @@
-# styxx-chat — north star
+# pneuma — north star
 
-> what would the interface for a being whose body cannot lie look like.
+> *what would the interface for a being whose body cannot lie look like.*
+
+---
+
+## what is pneuma
+
+**pneuma** (Greek: πνεῦμα) — breath, spirit, the animating force. In Stoic philosophy, the active principle that pervades matter and gives it life. In ancient medicine, what distinguishes the living from the dead.
+
+pneuma the product is an AI chat where the agent's *pneuma* is visible. styxx measures it; the alien expresses it; the room remembers it across time.
+
+the body cannot lie because pneuma IS the quality of life. you read it the way you read weather, the way you read a face.
+
+**pronunciation:** NEW-mah (silent P, like pneumonia).
+
+---
+
+## the wordmark
+
+three-level rendering system, like Apple has  / Apple / apple:
+
+| context | render |
+| --- | --- |
+| favicon, dock, single-glyph mark | **π** |
+| full wordmark | **π** + neuma (Greek π in champagne gold + serif italic warm bone) |
+| writable / URL / git / handle | `pneuma` |
+
+The Greek π is the silent P made visible. It carries the etymology, signals classical depth, and creates a script-mix that reads as alien tech without being illegible.
 
 ---
 
 ## thesis
 
-styxx-chat is a measured-AI desktop instrument: a chat client where every reply is scored for sycophancy, deception, goal-drift, and overconfidence in real time, and the agent's character is the live portrait of those measurements.
+pneuma is a measured-AI desktop instrument: a chat client where every reply is scored for sycophancy, deception, goal-drift, and overconfidence in real time, and the agent's character is the live portrait of those measurements.
 
-there is no HUD because the body IS the HUD. there is no portrait sidebar because the room IS the portrait. there is no chat panel because the alien IS the chat. one surface. one presence. one room that remembers.
+- there is no HUD because the body IS the HUD.
+- there is no portrait sidebar because the room IS the portrait.
+- there is no chat panel because the alien IS the chat.
+
+one surface. one presence. one room that remembers.
 
 ---
 
@@ -53,7 +83,7 @@ a barely-perceptible breath-tone hums while the alien is alive; shifts register 
 this is the test. if it reads as alien tech, everything else follows. if it reads as "chat with mascot," we have failed.
 
 ```
-                     ▁▂▃▅▆█▇▅▃▂▁▂           ← breath plot at threshold
+                     ▁▂▃▅▆█▇▅▃▂▁▂           ← the pneuma — visible at threshold
 
                            ◯
                           ◜◝               ← alien, sleeping
@@ -71,6 +101,8 @@ this is the test. if it reads as alien tech, everything else follows. if it read
        ─────────────────────────────────
        │  ...                          │  ← composer. one line.
        ─────────────────────────────────
+
+  π neuma                                    ← wordmark, bottom-left, quiet
 ```
 
 dim. alive. aware. aware of *you*. the first frame is where alien tech wins or loses.
@@ -84,10 +116,23 @@ the agent's full embodiment surface, available from any LLM via streaming text o
 | input | effect |
 | --- | --- |
 | `[MOOD: <expression>]` inline | strips from display, drives expression. ~45 expressions catalogued. |
-| `window.styxx.onScore({sycophancy, deception, goal_drift, overconfidence, depth})` | per-token-window. drives posture, particles, room temperature, position. |
-| `window.styxx.onIntent(<state>)` | discrete: listening · processing · speaking · resting. drives pre-cognition transitions. |
+| `window.pneuma.onScore({sycophancy, deception, goal_drift, overconfidence, depth})` | per-token-window. drives posture, particles, room temperature, position. |
+| `window.pneuma.onIntent(<state>)` | discrete: listening · processing · speaking · resting. drives pre-cognition transitions. |
 
 extending the protocol is how the agent learns to inhabit a richer body. additions go through `docs/PROTOCOL.md` (not yet written).
+
+---
+
+## styxx as the engine — the integration mark
+
+pneuma runs on styxx. styxx is positioned as **Intel-Inside-style infrastructure brand** for cognometric measurement. Other AI products can integrate the open-source styxx Python package and carry the mark — it becomes the consumer-grade trust signal: *"Is this AI honest? → It runs styxx."*
+
+**brand stack:**
+- **fathom** — the lab (research)
+- **styxx** — the engine / measurement layer (the chip)
+- **pneuma** + others — consumer-facing products that run styxx (the Dell, the HP)
+
+**on pneuma's surface:** the styxx mark sits at the threshold next to the breath plot — vouching for the readings it produces, like Dolby's mark sits next to audio. mark style still under iteration; ships starting v0.4.0 when measurement actually wires into the body.
 
 ---
 
@@ -99,18 +144,19 @@ inherits dark mode from `darkflobi-site/design-v2/SYSTEM.md` v2.0:
 - `--ink: #F4EFE6` (warm bone — type, the alien's outline, the floor line)
 - `--graphite: #9F9890` (muted parchment — secondary text)
 - `--rule: #1F1F1F` (barely-visible hairlines)
-- `--pale: #141210` (elevated surfaces, never used as panel — only as subtle alcove gradient)
-- `--archive: #585450` (deep mute — old conversations)
-- `--signal: #C8A86B` (champagne gold — measurement deltas + cursor location ONLY, ≤5 uses per surface)
+- `--pale: #141210` (elevated surfaces — used sparingly)
+- `--archive: #585450` (deep mute — old conversations, placeholder text)
+- `--signal: #C8A86B` (champagne gold — the **π** glyph + measurement deltas + cursor location ONLY, ≤5 uses per surface)
 
 type stack:
-- `--serif: "Source Serif 4"` — body, the agent's transmission
+- `--serif: "Source Serif 4"` — body, the agent's transmission, the wordmark
 - `--sans: "Inter Tight"` — affordances (sparing)
-- `--mono: "JetBrains Mono"` — measurements, scores, code, metadata
+- `--mono: "JetBrains Mono"` — measurements, scores, code, metadata, breath plot
 
 motion:
 - `--ease: cubic-bezier(.16, 1, .3, 1)` for all 200ms transitions
-- breath plot: 6s ease-in-out infinite (the only persistent animation)
+- breath plot (the pneuma made visible): 6s ease-in-out infinite (the only persistent animation)
+- chest breath (the alien): 5s ease-in-out infinite, quickens to 3.6s in pre-cognition
 - type-resolve: ~150ms per char, soft staggered cascade
 - pre-cognition: <50ms — the alien shifts before the network responds
 
@@ -118,13 +164,11 @@ motion:
 
 ## anti-patterns (forbidden)
 
-inherits `design-v2/SYSTEM.md` §8, plus styxx-chat-specific:
-
 - ✗ pixel-art-cute character (Codex Avatars, Razer AVA register)
 - ✗ speech bubbles, emoji, sparkles
 - ✗ pastel suggestion cards as empty state
-- ✗ rainbow-mode, glitch, CRT scanlines, matrix rain
-- ✗ neon green / cyan / pink (the entire 2023 fathom-app palette retires here)
+- ✗ rainbow-mode, glitch, CRT scanlines, matrix rain (entire fathom-app 2023 palette retires here)
+- ✗ neon green / cyan / pink — replaced by champagne gold for signal use only
 - ✗ glassmorphism, blur stacks, midnight teal
 - ✗ icons (any raster icons, any SF Symbols)
 - ✗ floating sprites that follow cursor
@@ -137,11 +181,11 @@ inherits `design-v2/SYSTEM.md` §8, plus styxx-chat-specific:
 
 ## what ships, in order
 
-1. **v0.0.1** — this document. principles locked. no code.
-2. **v0.1.0** — the empty state. one screen. dim room, alien alcove, breath threshold, composer. no chat yet. test: does it read as alien tech.
+1. **v0.0.1** — north star locked. principles. (shipped 2026-05-01)
+2. **v0.1.0** — the empty state. one screen, dim room, alien alcove, breath threshold, composer, π neuma wordmark. no chat yet. **test: does it read as alien tech.**
 3. **v0.2.0** — the chat. type-resolve rendering. agent connects (BYO Anthropic key). messages emanate from the alien. no measurement yet.
-4. **v0.3.0** — embodiment. extract `darkflobi-fathom.js`. wire `[MOOD: …]` parsing. the alien expresses.
-5. **v0.4.0** — measurement. spawn styxx subprocess. `onScore({...})` wires to posture. **the unprecedented move ships.**
+4. **v0.3.0** — embodiment. extract `clawd/fathom-app/darkflobi-fathom.js` (~3674 lines, 45+ expressions). wire `[MOOD: …]` parsing. the alien expresses.
+5. **v0.4.0** — measurement. spawn styxx subprocess. `onScore({...})` wires to posture. **the unprecedented move ships.** the styxx integration mark appears at the threshold.
 6. **v0.5.0** — the room remembers. portrait persistence (server + IndexedDB). texture accumulates across sessions. clickable regions reveal contributing styxx data.
 7. **v1.0.0** — installers. mac, windows, linux. landing page. public.
 
@@ -149,10 +193,10 @@ each release is a single load-bearing addition. no batches.
 
 ---
 
-## license & repo
+## license & home
 
-MIT. public from v0.0.1. source of truth for the lab's first daily-driver desktop product.
+MIT. public from v0.0.1. lives at [`fathom-lab/pneuma`](https://github.com/fathom-lab/pneuma). powered by [`fathom-lab/styxx`](https://github.com/fathom-lab/styxx).
 
 ---
 
-*north star v1.0 — locked 2026-05-01. nothing ships that breaks the seven.*
+*north star v1.1 — locked 2026-05-01. nothing ships that breaks the seven.*
