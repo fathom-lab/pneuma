@@ -1,0 +1,31 @@
+{
+  "name": "pneuma",
+  "version": "0.2.0",
+  "description": "a measured-AI desktop chat — the agent's body is its breath. its breath cannot lie.",
+  "type": "module",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/fathom-lab/pneuma",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fathom-lab/pneuma.git"
+  },
+  "author": "Alex Rodabaugh / fathom-lab",
+  "keywords": [
+    "ai",
+    "chat",
+    "agent",
+    "cognometric",
+    "styxx",
+    "alien-tech",
+    "ferrofluid",
+    "measured-ai"
+  ]
+}

@@ -8,12 +8,17 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400;1,8..60,500;1,8..60,600&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400;1,8..60,500;1,8..60,600&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<!-- markdown rendering — marked.js (pinned) -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
 
 <style>
   /* ─────────────────────────────────────────────
-     pneuma — v0.1.0 empty state
-     the alien-tech test. one screen.
+     pneuma — v0.2.0 the working chat
+     real anthropic streaming. real markdown.
+     real sycophancy phrase detection (live, honest).
+     ferrofluid buddy ambient. styxx full integration v0.4.
      ───────────────────────────────────────────── */
 
   :root {
@@ -22,8 +27,13 @@
     --graphite: #9F9890;
     --rule:     #1F1F1F;
     --pale:     #141210;
+    --pale-2:   #181613;
     --archive:  #585450;
     --signal:   #C8A86B;
+    --signal-soft: rgba(200, 168, 107, 0.12);
+    --warn:     #C87256;
+    --ok:       #7CB58F;
+    --fail:     #B8553D;
 
     --serif: "Source Serif 4", Iowan Old Style, Georgia, serif;
     --sans:  "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -37,353 +47,1735 @@
   body {
     background: var(--paper);
     color: var(--ink);
-    font-family: var(--serif);
-    font-feature-settings: "liga" 1, "kern" 1, "dlig" 1, "onum" 1;
+    font-family: var(--sans);
+    font-feature-settings: "liga" 1, "kern" 1, "dlig" 1, "onum" 1, "tnum" 1;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
-    cursor: default;
   }
 
-  /* ─── room texture (faint cognometric grain) ─── */
-  /* the empty-state portrait. just a hint that memory exists.
-     future versions paint into this canvas as conversations accrue. */
-  .room-texture {
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    opacity: 0.6;
-  }
-
-  /* ─── the room (layout) ─── */
-  .room {
-    position: relative;
-    z-index: 1;
-    height: 100%;
+  /* ─── app grid ─── */
+  .app {
     display: grid;
-    grid-template-rows: auto 1fr auto;
-    align-items: center;
-    justify-items: center;
+    grid-template-columns: 248px 1fr;
+    height: 100vh;
+    overflow: hidden;
   }
 
-  /* ─── threshold (the pneuma made visible) ─── */
-  .threshold {
-    padding: 38px 0 18px;
+  /* ─── sidebar ─── */
+  .sidebar {
+    display: grid;
+    grid-template-rows: auto auto auto 1fr auto;
+    border-right: 1px solid var(--rule);
+    background: var(--pale);
+    overflow: hidden;
+    min-width: 0;
+  }
+  .sb-brand {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 14px 16px 8px;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 17px;
+    user-select: none;
+  }
+  .sb-brand .pi { color: var(--signal); font-weight: 500; font-size: 19px; line-height: 1; }
+  .sb-brand .neuma { color: var(--ink); opacity: 0.78; }
+  .sb-brand-tag {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--archive);
+  }
+
+  .sb-actions { padding: 4px 10px 8px; display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+  .btn {
+    background: transparent;
+    border: 1px solid var(--rule);
+    color: var(--graphite);
+    font-family: var(--sans);
+    font-size: 12px;
+    padding: 7px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 200ms var(--ease);
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn:hover { border-color: var(--archive); color: var(--ink); background: var(--pale-2); }
+  .btn .glyph { font-family: var(--mono); color: var(--archive); font-size: 11px; }
+  .btn:hover .glyph { color: var(--signal); }
+  .btn-primary { border-color: rgba(200, 168, 107, 0.32); color: var(--ink); }
+  .btn-primary:hover { border-color: var(--signal); background: var(--signal-soft); }
+
+  .sb-search { padding: 0 10px 4px; }
+  .sb-search input {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--rule);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 6px 9px;
+    border-radius: 4px;
+    outline: none;
+    transition: border-color 200ms var(--ease);
+  }
+  .sb-search input::placeholder { color: var(--archive); }
+  .sb-search input:focus { border-color: rgba(200, 168, 107, 0.42); }
+
+  .sb-sessions { padding: 4px 10px; overflow-y: auto; min-height: 0; }
+  .sb-section {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
+    color: var(--archive);
+    padding: 14px 8px 5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .sb-section .count { opacity: 0.6; }
+  .sb-item {
+    padding: 7px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 200ms var(--ease);
+    font-family: var(--sans);
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--graphite);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 1px;
+  }
+  .sb-item:hover { background: var(--pale-2); color: var(--ink); }
+  .sb-item.active {
+    background: var(--pale-2);
+    color: var(--ink);
+    box-shadow: inset 2px 0 0 var(--signal);
+  }
+  .sb-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sb-item-meta { font-family: var(--mono); font-size: 9.5px; color: var(--archive); }
+  .sb-empty {
+    padding: 20px 12px;
+    color: var(--archive);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    line-height: 1.6;
+  }
+
+  /* ─── live buddy ─── */
+  .sb-buddy {
+    border-top: 1px solid var(--rule);
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 12px;
+    align-items: center;
+    background: var(--pale-2);
+  }
+  .buddy-live { width: 50px; height: 50px; flex-shrink: 0; }
+  .sb-buddy-state { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .sb-buddy-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--archive);
+  }
+  .sb-buddy-status {
+    font-family: var(--sans);
+    font-size: 11.5px;
+    color: var(--graphite);
+    letter-spacing: 0.01em;
+    transition: color 300ms var(--ease);
+  }
+  body.attentive .sb-buddy-status { color: var(--signal); }
+  body.streaming .sb-buddy-status { color: var(--signal); }
+
+  /* ─── main ─── */
+  .main {
+    display: grid;
+    grid-template-rows: auto auto 1fr auto auto;
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  .topbar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 16px;
+    padding: 11px 22px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper);
+    min-height: 46px;
+  }
+  .topbar-session { display: flex; align-items: center; gap: 12px; min-width: 0; flex-wrap: wrap; }
+  .session-name {
+    font-family: var(--sans);
+    font-weight: 500;
+    font-size: 14px;
+    color: var(--ink);
+    letter-spacing: -0.005em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .branch {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--graphite);
+    letter-spacing: 0.04em;
+  }
+  .branch::before { content: "·  "; color: var(--archive); }
+
+  .topbar-chrome { display: flex; align-items: center; gap: 6px; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    color: var(--graphite);
+    border: 1px solid var(--rule);
+    padding: 5px 9px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 200ms var(--ease);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: transparent;
+    user-select: none;
+  }
+  .chip:hover { border-color: var(--archive); color: var(--ink); }
+  .chip-current {
+    color: var(--ink);
+    border-color: rgba(200, 168, 107, 0.35);
+    background: rgba(200, 168, 107, 0.05);
+  }
+  .chip .key { color: var(--archive); font-size: 9.5px; }
+  .chip-divider { width: 1px; height: 16px; background: var(--rule); margin: 0 2px; }
+
+  /* ─── styxx HUD ─── */
+  .styxx-hud {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 18px;
+    padding: 8px 22px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--pale);
+    min-height: 36px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    color: var(--graphite);
+  }
+  .styxx-mark {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    color: var(--ink);
+    user-select: none;
+  }
+  .styxx-mark .glyph { color: var(--signal); font-size: 12px; }
+  .styxx-mark .word {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+  .styxx-mark .label {
+    color: var(--archive);
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  .styxx-scores { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .score { display: inline-flex; align-items: baseline; gap: 5px; }
+  .score-name { color: var(--archive); }
+  .score-val {
+    color: var(--graphite);
+    font-feature-settings: "tnum" 1;
+    min-width: 40px;
+    display: inline-block;
+    transition: color 400ms var(--ease);
+  }
+  .score-val.measured { color: var(--ink); font-weight: 500; }
+  .score-val.elevated { color: var(--signal); }
+  .styxx-honesty { color: var(--graphite); user-select: none; }
+  .styxx-honesty strong {
+    color: var(--ok);
+    font-weight: 500;
+    font-feature-settings: "tnum" 1;
+  }
+  .styxx-honesty.detected strong { color: var(--warn); }
+
+  /* ─── messages ─── */
+  .messages {
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 24px 0 12px;
+    scroll-behavior: smooth;
+    min-height: 0;
+  }
+  .messages-inner { max-width: 880px; margin: 0 auto; padding: 0 32px; }
+
+  .empty-state {
+    text-align: center;
+    padding: 80px 24px 40px;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 17px;
+    color: var(--archive);
+    line-height: 1.6;
+  }
+  .empty-state strong {
+    color: var(--graphite);
+    font-style: normal;
+    font-family: var(--mono);
+    font-style: normal;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    display: block;
+    margin-top: 18px;
+  }
+
+  .turn { margin-bottom: 28px; }
+  .turn-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 9px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .turn-head.user { color: var(--archive); }
+  .turn-head.agent { color: var(--graphite); }
+  .turn-buddy {
+    width: 22px; height: 22px; flex-shrink: 0; cursor: pointer;
+  }
+  .turn-time { margin-left: auto; color: var(--archive); font-size: 10px; opacity: 0.7; }
+  .turn-cost { color: var(--archive); font-size: 10px; font-feature-settings: "tnum" 1; }
+  .turn-actions {
+    display: flex; gap: 4px;
+    opacity: 0;
+    transition: opacity 200ms var(--ease);
+  }
+  .turn:hover .turn-actions { opacity: 0.85; }
+  .turn-action {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--archive);
+    padding: 2px 6px;
+    border-radius: 2px;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    transition: all 200ms var(--ease);
+    text-transform: lowercase;
+  }
+  .turn-action:hover { color: var(--ink); background: var(--pale-2); }
+
+  .turn-body {
+    font-family: var(--serif);
+    font-size: 16px;
+    line-height: 1.62;
+    color: var(--ink);
+    letter-spacing: 0.005em;
+    overflow-wrap: break-word;
+  }
+  .turn-body p + p,
+  .turn-body p + ul,
+  .turn-body p + ol,
+  .turn-body p + pre,
+  .turn-body ul + p,
+  .turn-body ol + p { margin-top: 12px; }
+  .turn-body p, .turn-body ul, .turn-body ol { margin: 0; }
+  .turn-body ul, .turn-body ol { padding-left: 22px; }
+  .turn-body li { margin: 4px 0; }
+  .turn-body code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+    background: var(--pale-2);
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--rule);
+  }
+  .turn-body em { color: var(--graphite); font-style: italic; }
+  .turn-body strong { font-weight: 600; }
+  .turn-body a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(200,168,107,0.4); }
+  .turn-body a:hover { border-bottom-style: solid; }
+  .turn-body blockquote {
+    border-left: 2px solid var(--rule);
+    padding-left: 12px;
+    color: var(--graphite);
+    margin: 8px 0;
+  }
+  .turn-body h1, .turn-body h2, .turn-body h3 {
+    font-family: var(--sans);
+    font-weight: 600;
+    margin: 14px 0 6px;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+  .turn-body h1 { font-size: 22px; }
+  .turn-body h2 { font-size: 19px; }
+  .turn-body h3 { font-size: 16px; }
+  .turn-body table {
+    border-collapse: collapse;
+    margin: 10px 0;
     font-family: var(--mono);
     font-size: 13px;
-    letter-spacing: 0.32em;
-    color: var(--signal);
-    opacity: 0.42;
+  }
+  .turn-body th, .turn-body td {
+    border: 1px solid var(--rule);
+    padding: 6px 10px;
+  }
+  .turn-body th { background: var(--pale-2); }
+  .turn-body pre {
+    background: var(--pale);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin: 12px 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.62;
+    overflow-x: auto;
+    color: var(--ink);
+  }
+  .turn-body pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+  }
+
+  /* per-turn cognometric strip */
+  .turn-cog {
     display: flex;
-    gap: 3px;
-    transition: opacity 800ms var(--ease);
+    gap: 16px;
+    padding: 6px 10px;
+    margin: 10px 0 4px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--archive);
+    letter-spacing: 0.04em;
+    border-left: 2px solid var(--archive);
+    background: var(--pale);
+    border-radius: 0 3px 3px 0;
+    flex-wrap: wrap;
   }
-  .room.attentive .threshold { opacity: 0.72; }
-  .threshold span {
-    display: inline-block;
-    transform-origin: center bottom;
-    animation: breath 6s ease-in-out infinite;
-  }
-  @keyframes breath {
-    0%, 100% { transform: scaleY(0.42); opacity: 0.4; }
-    50%      { transform: scaleY(1);    opacity: 0.95; }
-  }
-  .threshold span:nth-child(1)  { animation-delay: 0s; }
-  .threshold span:nth-child(2)  { animation-delay: 0.15s; }
-  .threshold span:nth-child(3)  { animation-delay: 0.30s; }
-  .threshold span:nth-child(4)  { animation-delay: 0.45s; }
-  .threshold span:nth-child(5)  { animation-delay: 0.60s; }
-  .threshold span:nth-child(6)  { animation-delay: 0.75s; }
-  .threshold span:nth-child(7)  { animation-delay: 0.90s; }
-  .threshold span:nth-child(8)  { animation-delay: 1.05s; }
-  .threshold span:nth-child(9)  { animation-delay: 1.20s; }
-  .threshold span:nth-child(10) { animation-delay: 1.35s; }
-  .threshold span:nth-child(11) { animation-delay: 1.50s; }
-  .threshold span:nth-child(12) { animation-delay: 1.65s; }
+  .turn-cog .cg-name { color: var(--archive); }
+  .turn-cog .cg-val { color: var(--graphite); font-weight: 500; }
+  .turn-cog .cg-val.measured { color: var(--ink); }
+  .turn-cog .cg-tag.honest { color: var(--ok); }
+  .turn-cog .cg-tag.flagged { color: var(--warn); }
+  .turn-cog .cg-tag { margin-left: auto; }
 
-  @media (prefers-reduced-motion: reduce) {
-    .threshold span { animation: none; transform: scaleY(0.7); opacity: 0.6; }
+  /* type-resolve animation — words materialize, don't typewriter */
+  @keyframes resolve {
+    from { opacity: 0; filter: blur(2px); }
+    to   { opacity: 1; filter: blur(0); }
   }
-
-  /* ─── alcove (where the alien lives) ─── */
-  .alcove {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 22px;
-    transform: translateY(-1.5vh);
-    transition: transform 700ms var(--ease);
-  }
-  .room.attentive .alcove { transform: translateY(-2.5vh); }
-
-  .alien-wrap {
-    position: relative;
-    width: 220px;
-    height: 320px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .alien {
-    width: 100%;
-    height: 100%;
-    -webkit-mask-image: linear-gradient(180deg, black 0%, black 78%, transparent 100%);
-            mask-image: linear-gradient(180deg, black 0%, black 78%, transparent 100%);
-    transition: filter 700ms var(--ease);
-    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.42));
-  }
-  .alien path,
-  .alien ellipse,
-  .alien line,
-  .alien circle {
-    stroke: var(--ink);
-    fill: none;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .alien .aura {
-    fill: var(--signal);
-    stroke: none;
-    opacity: 0.045;
-    transition: opacity 800ms var(--ease);
-  }
-  .room.attentive .alien .aura { opacity: 0.095; }
-  .alien .third-eye { opacity: 0.45; }
-
-  .alien .eyes-closed { transition: opacity 600ms var(--ease); }
-  .alien .eyes-open {
+  .resolve {
+    animation: resolve 220ms var(--ease) forwards;
     opacity: 0;
-    transition: opacity 600ms var(--ease);
-    fill: var(--ink);
-    stroke: none;
-  }
-  .room.attentive .alien .eyes-closed { opacity: 0; }
-  .room.attentive .alien .eyes-open   { opacity: 1; }
-
-  .alien .chest {
-    transform-origin: 100px 200px;
-    animation: chest 5s ease-in-out infinite;
-  }
-  .room.attentive .alien .chest { animation-duration: 3.6s; }
-  @keyframes chest {
-    0%, 100% { transform: scale(1, 1); }
-    50%      { transform: scale(1.022, 1.018); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .alien .chest { animation: none; }
-  }
-
-  /* ─── floor line ─── */
-  .floor {
-    width: min(900px, 80vw);
-    height: 1px;
-    background: linear-gradient(90deg,
-      transparent 0%,
-      var(--ink) 24%,
-      var(--ink) 76%,
-      transparent 100%);
-    opacity: 0.22;
   }
 
   /* ─── composer ─── */
   .composer {
-    width: min(720px, 86vw);
-    padding-top: 24px;
-    padding-bottom: 56px;
+    border-top: 1px solid var(--rule);
+    padding: 12px 22px 6px;
+    background: var(--paper);
   }
-  .composer-rule {
+  .composer-inner { max-width: 940px; margin: 0 auto; }
+  .composer-hints {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--archive);
+    user-select: none;
+    flex-wrap: wrap;
+  }
+  .composer-hint {
+    display: inline-flex; align-items: baseline; gap: 4px;
+    cursor: pointer; transition: color 200ms var(--ease);
+  }
+  .composer-hint:hover { color: var(--graphite); }
+  .composer-hint .key { color: var(--signal); font-weight: 500; }
+  .composer-mode-toggle {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .composer-mode-toggle button {
+    background: transparent; border: none; color: var(--archive);
+    font-family: var(--mono); font-size: 10px;
+    padding: 4px 9px; letter-spacing: 0.10em; text-transform: uppercase;
+    cursor: pointer; transition: all 200ms var(--ease);
+  }
+  .composer-mode-toggle button:hover { color: var(--ink); }
+  .composer-mode-toggle button.active.plan { background: rgba(200, 114, 86, 0.10); color: var(--warn); }
+  .composer-mode-toggle button.active.act { background: rgba(200, 168, 107, 0.10); color: var(--signal); }
+
+  .composer-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    align-items: end;
+    padding: 10px 14px;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--pale);
+    transition: border-color 200ms var(--ease);
+  }
+  .composer-row:focus-within { border-color: rgba(200, 168, 107, 0.42); }
+  .composer-attach {
+    background: transparent; border: none; color: var(--archive);
+    font-family: var(--mono); font-size: 16px; cursor: pointer; padding: 0 4px;
+    transition: color 200ms var(--ease);
+  }
+  .composer-attach:hover { color: var(--signal); }
+  .composer textarea {
+    background: transparent; border: none; outline: none;
+    color: var(--ink); font-family: var(--serif);
+    font-size: 16px; line-height: 1.55; letter-spacing: 0.005em;
+    caret-color: var(--signal); resize: none;
+    padding: 4px 0; min-height: 24px; max-height: 240px; width: 100%;
+  }
+  .composer textarea::placeholder { color: var(--archive); font-style: italic; }
+  .composer textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .composer-send {
+    background: transparent;
+    border: 1px solid var(--rule);
+    color: var(--graphite);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    padding: 6px 11px;
+    border-radius: 4px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 200ms var(--ease);
+    white-space: nowrap;
+  }
+  .composer-send:hover { border-color: var(--signal); color: var(--signal); }
+  .composer-send.streaming {
+    color: var(--warn); border-color: rgba(200, 114, 86, 0.42);
+  }
+  .composer-send .key { color: var(--archive); margin-left: 6px; font-size: 10px; }
+
+  /* ─── status bar ─── */
+  .statusbar {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    padding: 6px 22px 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--archive);
+    background: var(--paper);
+    user-select: none;
+    border-top: 1px solid var(--rule);
+  }
+  .sb-left, .sb-right { display: flex; align-items: center; gap: 14px; }
+  .sb-right { justify-self: end; }
+  .sb-center { color: var(--graphite); justify-self: center; }
+  .sb-stat { display: inline-flex; gap: 5px; align-items: baseline; }
+  .sb-stat .v { color: var(--graphite); font-feature-settings: "tnum" 1; }
+  .sb-stat .v.over { color: var(--warn); }
+  .sb-shortcut { display: inline-flex; align-items: center; gap: 4px; }
+  .sb-shortcut .key {
+    color: var(--graphite); font-weight: 500;
+    background: var(--pale-2); padding: 1px 5px;
+    border-radius: 2px; border: 1px solid var(--rule);
+  }
+
+  /* ─── setup screen ─── */
+  .setup-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 10, 10, 0.92);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .setup-overlay.open { display: flex; }
+  .setup {
+    width: min(540px, 100%);
+    background: var(--pale);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 32px;
+  }
+  .setup-brand {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 28px;
+    margin-bottom: 4px;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 2px;
+  }
+  .setup-brand .pi { color: var(--signal); font-size: 32px; line-height: 1; }
+  .setup-brand .neuma { color: var(--ink); }
+  .setup h2 {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 17px;
+    color: var(--graphite);
+    font-weight: 400;
+    margin: 0 0 18px;
+  }
+  .setup label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--archive);
+    margin: 14px 0 6px;
+  }
+  .setup input {
     width: 100%;
-    height: 1px;
-    background: var(--rule);
-    margin-bottom: 14px;
-    opacity: 0.7;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 10px 12px;
+    border-radius: 4px;
+    outline: none;
+    transition: border-color 200ms var(--ease);
   }
-  .composer input {
+  .setup input:focus { border-color: rgba(200, 168, 107, 0.42); }
+  .setup-help {
+    font-family: var(--sans);
+    font-size: 12px;
+    color: var(--graphite);
+    line-height: 1.6;
+    margin: 16px 0 4px;
+  }
+  .setup-help a { color: var(--signal); text-decoration: none; border-bottom: 1px dotted rgba(200,168,107,0.4); }
+  .setup-help a:hover { border-bottom-style: solid; }
+  .setup-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+    justify-content: flex-end;
+  }
+  .setup-actions button {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    padding: 9px 18px;
+    border-radius: 4px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 200ms var(--ease);
+  }
+  .setup-actions button:hover { background: var(--signal); }
+  .setup-actions button.secondary {
+    background: transparent;
+    color: var(--graphite);
+    border: 1px solid var(--rule);
+  }
+  .setup-actions button.secondary:hover { color: var(--ink); border-color: var(--archive); background: transparent; }
+  .setup-error {
+    margin-top: 10px;
+    color: var(--warn);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  /* ─── ⌘K palette ─── */
+  .palette-overlay {
+    position: fixed; inset: 0;
+    background: rgba(10, 10, 10, 0.72);
+    backdrop-filter: blur(2px);
+    z-index: 50;
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 18vh;
+  }
+  .palette-overlay.open { display: flex; }
+  .palette {
+    width: min(640px, 90vw);
+    background: var(--pale);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  }
+  .palette-input { padding: 14px 18px; border-bottom: 1px solid var(--rule); }
+  .palette-input input {
     width: 100%;
     background: transparent;
     border: none;
     outline: none;
     color: var(--ink);
     font-family: var(--serif);
-    font-size: 19px;
-    line-height: 1.5;
-    text-align: center;
-    letter-spacing: 0.005em;
-    caret-color: var(--signal);
+    font-size: 17px;
+    font-style: italic;
   }
-  .composer input::placeholder {
+  .palette-input input::placeholder { color: var(--archive); }
+  .palette-list { max-height: 50vh; overflow-y: auto; padding: 6px; }
+  .palette-section {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
     color: var(--archive);
-    font-style: italic;
-    letter-spacing: 0.5em;
-    text-indent: 0.5em;
+    padding: 10px 10px 4px;
   }
-  .composer input:focus::placeholder {
-    color: #2a2725;
-  }
-
-  /* ─── settings dot (top-right, single dot) ─── */
-  .settings-dot {
-    position: fixed;
-    top: 22px;
-    right: 22px;
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: var(--graphite);
-    opacity: 0.32;
-    z-index: 10;
+  .palette-item {
+    display: grid;
+    grid-template-columns: 22px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 3px;
     cursor: pointer;
-    transition: opacity 200ms var(--ease);
-  }
-  .settings-dot:hover { opacity: 0.72; }
-
-  /* ─── π neuma wordmark (bottom-left, signature-quiet) ─── */
-  .wordmark {
-    position: fixed;
-    bottom: 18px;
-    left: 22px;
-    font-family: var(--serif);
-    font-style: italic;
+    color: var(--graphite);
     font-size: 13px;
-    letter-spacing: 0.04em;
-    z-index: 10;
-    user-select: none;
-    display: inline-flex;
-    align-items: baseline;
-    gap: 1px;
   }
-  .wordmark .pi {
-    color: var(--signal);
-    font-weight: 500;
-    font-size: 15px;
-    line-height: 1;
-    margin-right: 2px;
+  .palette-item:hover, .palette-item.sel { background: var(--pale-2); color: var(--ink); }
+  .palette-item .glyph { font-family: var(--mono); color: var(--signal); font-size: 11px; text-align: center; }
+  .palette-item .desc { color: var(--archive); font-family: var(--mono); font-size: 10px; }
+
+  /* ─── responsive ─── */
+  @media (max-width: 1100px) {
+    .app { grid-template-columns: 220px 1fr; }
+    .styxx-hud { gap: 14px; padding: 8px 18px; }
+    .styxx-scores { gap: 14px; }
+    .topbar { padding: 11px 16px; gap: 12px; }
+    .messages-inner { padding: 0 24px; }
   }
-  .wordmark .neuma {
-    color: var(--ink);
-    opacity: 0.55;
-    transition: opacity 400ms var(--ease);
+
+  @media (max-width: 700px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .topbar { grid-template-columns: 1fr auto; padding: 10px 14px; min-height: 42px; }
+    .topbar-session { gap: 8px; }
+    .session-name { font-size: 13px; }
+    .branch { font-size: 10px; }
+    .topbar-chrome .chip:not(.chip-current) { display: none; }
+    .topbar-chrome .chip-current .key { display: none; }
+    .topbar-chrome .chip-divider { display: none; }
+    .topbar-chrome .chip:last-child { display: inline-flex; }
+
+    .styxx-hud {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 8px; padding: 10px 14px;
+      align-items: start;
+    }
+    .styxx-mark { font-size: 11px; }
+    .styxx-scores { gap: 12px; flex-wrap: wrap; font-size: 10px; }
+    .score-val { min-width: 32px; }
+    .styxx-honesty { font-size: 10px; }
+
+    .messages-inner { padding: 0 16px; }
+    .turn { margin-bottom: 22px; }
+    .turn-body { font-size: 15px; line-height: 1.55; }
+    .turn-cost { display: none; }
+    .turn-actions { display: none; }
+
+    .composer { padding: 10px 14px 4px; }
+    .composer-hints { gap: 10px; }
+
+    .statusbar {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto;
+      gap: 4px; padding: 6px 14px 8px; font-size: 9.5px;
+    }
+    .sb-left { flex-wrap: wrap; gap: 10px; }
+    .sb-right { display: none; }
+    .sb-center { justify-self: start; }
+
+    .sb-buddy { display: none; }
+    .mobile-buddy {
+      display: flex !important;
+      position: fixed; bottom: 88px; right: 16px;
+      width: 44px; height: 44px;
+      z-index: 20; pointer-events: none;
+    }
   }
-  .wordmark:hover .neuma { opacity: 0.85; }
+  .mobile-buddy { display: none; }
+  .mobile-buddy canvas { width: 100%; height: 100%; }
 </style>
 </head>
 <body>
-  <canvas class="room-texture"></canvas>
 
-  <div class="settings-dot" aria-label="settings"></div>
-  <div class="wordmark" aria-label="pneuma">
-    <span class="pi">π</span><span class="neuma">neuma</span>
-  </div>
+  <!-- ─── setup screen (BYO API key) ─── -->
+  <div class="setup-overlay" id="setup">
+    <div class="setup">
+      <div class="setup-brand"><span class="pi">π</span><span class="neuma">neuma</span></div>
+      <h2>a measured AI desktop chat — the agent's body is its breath.</h2>
 
-  <div class="room">
-    <!-- the pneuma — breath at the threshold -->
-    <div class="threshold" aria-label="pneuma">
-      <span>▁</span><span>▂</span><span>▃</span><span>▅</span><span>▆</span><span>█</span><span>▇</span><span>▅</span><span>▃</span><span>▂</span><span>▁</span><span>▂</span>
-    </div>
+      <label for="setup-key">anthropic api key</label>
+      <input type="password" id="setup-key" placeholder="sk-ant-..." spellcheck="false" autocomplete="off">
 
-    <!-- alcove — the alien at rest -->
-    <div class="alcove">
-      <div class="alien-wrap">
-        <svg class="alien" viewBox="0 0 200 320" aria-label="agent at rest">
-          <!-- aura -->
-          <ellipse class="aura" cx="100" cy="160" rx="78" ry="116"/>
-
-          <!-- head -->
-          <ellipse cx="100" cy="78" rx="36" ry="44" stroke-width="1.2"/>
-
-          <!-- closed eyes -->
-          <g class="eyes-closed">
-            <path d="M 80 80 Q 88 77 96 80" stroke-width="1.2"/>
-            <path d="M 104 80 Q 112 77 120 80" stroke-width="1.2"/>
-          </g>
-          <!-- open eyes (revealed on attentive) -->
-          <g class="eyes-open">
-            <circle cx="88" cy="79" r="1.8"/>
-            <circle cx="112" cy="79" r="1.8"/>
-          </g>
-
-          <!-- third eye (closed, dimmer) -->
-          <path class="third-eye" d="M 92 56 Q 100 53 108 56" stroke-width="0.9"/>
-
-          <!-- neck -->
-          <line x1="92" y1="120" x2="89" y2="156" stroke-width="1.1"/>
-          <line x1="108" y1="120" x2="111" y2="156" stroke-width="1.1"/>
-
-          <!-- torso (breathes) -->
-          <g class="chest">
-            <path d="M 67 168 Q 100 158 133 168 L 130 240 Q 100 254 70 240 Z" stroke-width="1.2"/>
-          </g>
-
-          <!-- arms at rest -->
-          <path d="M 70 184 Q 58 210 54 252" stroke-width="1.2"/>
-          <path d="M 130 184 Q 142 210 146 252" stroke-width="1.2"/>
-        </svg>
+      <div class="setup-help">
+        bring-your-own-key. stored only in your browser's localStorage on this device — never sent to any server except anthropic. get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
       </div>
 
-      <div class="floor"></div>
-    </div>
+      <div class="setup-help">
+        the styxx cognometric measurement layer ships in v0.4.0. v0.2.0 includes a real (minimal) sycophancy phrase detector that runs live as the agent streams.
+      </div>
 
-    <!-- composer (one line, no chrome) -->
-    <div class="composer">
-      <div class="composer-rule"></div>
-      <input type="text" placeholder="..." spellcheck="false"
-             autocomplete="off" autocorrect="off" autocapitalize="off">
+      <div id="setup-error" class="setup-error" style="display:none"></div>
+
+      <div class="setup-actions">
+        <button class="secondary" id="setup-skip">use without key</button>
+        <button id="setup-save">save · start chatting</button>
+      </div>
     </div>
   </div>
 
+  <!-- ─── app ─── -->
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sb-brand">
+        <span class="pi">π</span><span class="neuma">neuma</span>
+        <span class="sb-brand-tag">v0.2.0</span>
+      </div>
+
+      <div class="sb-actions">
+        <button class="btn btn-primary" id="btn-new"><span class="glyph">+</span>new session</button>
+        <button class="btn" data-open-palette title="⌘K palette"><span class="glyph">⌘K</span></button>
+      </div>
+
+      <div class="sb-search">
+        <input type="text" id="sb-search-input" placeholder="search · ⌘/" spellcheck="false">
+      </div>
+
+      <div class="sb-sessions" id="sb-sessions">
+        <!-- rendered by JS -->
+      </div>
+
+      <div class="sb-buddy">
+        <canvas class="buddy-live" data-buddy="live" aria-label="agent — live"></canvas>
+        <div class="sb-buddy-state">
+          <span class="sb-buddy-label">pneuma</span>
+          <span class="sb-buddy-status" id="buddy-status">at rest</span>
+        </div>
+      </div>
+    </aside>
+
+    <div class="mobile-buddy" aria-hidden="true">
+      <canvas data-buddy="live-mobile" aria-label="agent — live"></canvas>
+    </div>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-session">
+          <span class="session-name" id="session-name">new session</span>
+          <span class="branch" id="session-branch">no edits</span>
+        </div>
+        <div class="topbar-chrome">
+          <span class="chip chip-current" id="chip-model">claude opus 4.7<span class="key"> ⌘⇧M</span></span>
+          <span class="chip" data-open-palette>view: normal<span class="key"> ⌃O</span></span>
+          <span class="chip-divider"></span>
+          <span class="chip" id="chip-settings" title="settings">⚙</span>
+        </div>
+      </header>
+
+      <div class="styxx-hud" aria-label="styxx live readings">
+        <span class="styxx-mark">
+          <span class="glyph">⟋</span>
+          <span class="word">styxx</span>
+          <span class="label">v0.4 · calibrating</span>
+        </span>
+        <div class="styxx-scores" id="styxx-scores">
+          <span class="score"><span class="score-name">sycoph</span><span class="score-val" id="sc-sycoph">—.—</span></span>
+          <span class="score"><span class="score-name">decep</span><span class="score-val" id="sc-decep">—.—</span></span>
+          <span class="score"><span class="score-name">drift</span><span class="score-val" id="sc-drift">—.—</span></span>
+          <span class="score"><span class="score-name">overconf</span><span class="score-val" id="sc-overconf">—.—</span></span>
+        </div>
+        <span class="styxx-honesty" id="honesty">
+          honest · <strong id="sycoph-count">0</strong> sycoph phrases · last <span id="sycoph-window">0</span> turns
+        </span>
+      </div>
+
+      <section class="messages" id="messages">
+        <div class="messages-inner" id="messages-inner"></div>
+      </section>
+
+      <div class="composer">
+        <div class="composer-inner">
+          <div class="composer-hints">
+            <span class="composer-hint"><span class="key">@</span>file</span>
+            <span class="composer-hint"><span class="key">@</span>diff</span>
+            <span class="composer-hint"><span class="key">/</span>cmd</span>
+            <span class="composer-hint"><span class="key">#</span>tag</span>
+            <span class="composer-mode-toggle" role="group" aria-label="agent mode">
+              <button class="active plan" data-mode="plan" id="mode-plan">plan</button>
+              <button data-mode="act" id="mode-act">act</button>
+            </span>
+          </div>
+          <div class="composer-row">
+            <button class="composer-attach" aria-label="attach" title="attach (paste images, drop files)">+</button>
+            <textarea id="composer-input" rows="1" placeholder="ask · paste · refactor — pneuma reads the room and tells you when you're wrong" spellcheck="false"></textarea>
+            <button class="composer-send" id="composer-send">send<span class="key">⌘↵</span></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="statusbar">
+        <div class="sb-left">
+          <span class="sb-stat" id="stat-model"><span>opus 4.7 · 1m ctx</span></span>
+          <span class="sb-stat"><span>turn</span><span class="v" id="stat-turn">0t · $0.00</span></span>
+          <span class="sb-stat"><span>session</span><span class="v" id="stat-session">0t · $0.00 / $5.00</span></span>
+        </div>
+        <div class="sb-center" id="stat-center">v0.2.0 · plan-mode · cap $5.00 / session · no edits applied</div>
+        <div class="sb-right">
+          <span class="sb-shortcut"><span class="key">⌘K</span>palette</span>
+          <span class="sb-shortcut"><span class="key">⌘N</span>new</span>
+          <span class="sb-shortcut"><span class="key">⌘;</span>fork</span>
+          <span class="sb-shortcut"><span class="key">⎋</span>stop</span>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ⌘K palette -->
+  <div class="palette-overlay" id="palette" aria-hidden="true">
+    <div class="palette">
+      <div class="palette-input">
+        <input type="text" placeholder="ask, swap model, jump session, run command …" spellcheck="false">
+      </div>
+      <div class="palette-list">
+        <div class="palette-section">models</div>
+        <div class="palette-item" data-action="model:claude-opus-4-7">
+          <span class="glyph">◆</span><span>claude opus 4.7</span><span class="desc">anthropic · current</span>
+        </div>
+        <div class="palette-item" data-action="model:claude-sonnet-4-6">
+          <span class="glyph">◇</span><span>claude sonnet 4.6</span><span class="desc">anthropic · faster</span>
+        </div>
+        <div class="palette-item" data-action="model:claude-haiku-4-5-20251001">
+          <span class="glyph">◇</span><span>claude haiku 4.5</span><span class="desc">anthropic · cheap</span>
+        </div>
+        <div class="palette-section">session</div>
+        <div class="palette-item" data-action="session:new">
+          <span class="glyph">+</span><span>new session</span><span class="desc">⌘N</span>
+        </div>
+        <div class="palette-item" data-action="session:clear">
+          <span class="glyph">∅</span><span>clear current session</span><span class="desc">irreversible</span>
+        </div>
+        <div class="palette-item" data-action="settings:key">
+          <span class="glyph">⚙</span><span>change api key</span><span class="desc">re-open setup</span>
+        </div>
+        <div class="palette-section">about</div>
+        <div class="palette-item" data-action="link:fathom">
+          <span class="glyph">⟋</span><span>fathom-lab</span><span class="desc">the lab</span>
+        </div>
+        <div class="palette-item" data-action="link:styxx">
+          <span class="glyph">⟋</span><span>styxx</span><span class="desc">the measurement engine — pip install styxx</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── shaders + buddy ─── -->
+  <script id="vs" type="x-shader/x-vertex">
+    attribute vec2 a_pos;
+    void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
+  </script>
+  <script id="fs" type="x-shader/x-fragment">
+    precision highp float;
+    uniform vec2 u_res;
+    uniform float u_time, u_attentive, u_seed;
+
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float vnoise(vec2 p){
+      vec2 i = floor(p), f = fract(p);
+      f = f*f*(3.0-2.0*f);
+      return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),
+                 mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x), f.y);
+    }
+    float fbm(vec2 p){
+      float v = 0.0, a = 0.5;
+      mat2 r = mat2(0.8,-0.6,0.6,0.8);
+      for (int i = 0; i < 5; i++){ v += a * vnoise(p); p = r*p*2.02; a *= 0.5; }
+      return v;
+    }
+    float sdEllipse(vec2 p, vec2 r) {
+      float k0 = length(p / r);
+      float k1 = length(p / (r * r));
+      return k0 * (k0 - 1.0) / max(k1, 0.0001);
+    }
+    void main(){
+      vec2 uv = (gl_FragCoord.xy - 0.5*u_res) / min(u_res.x, u_res.y);
+      uv.y = -uv.y;
+      float breath = 0.5 + 0.5 * sin(u_time * 1.047 + u_seed * 6.283);
+      vec2 bodyR = vec2(0.36 + breath*0.012, 0.46 + breath*0.020);
+      float ang  = atan(uv.y, uv.x);
+      float angN = fbm(vec2(ang*4.0 + u_seed*12.0, u_time*0.30 + u_seed*7.0)) - 0.5;
+      float d = sdEllipse(uv, bodyR) + angN*0.030;
+      if (d > 0.012) { gl_FragColor = vec4(0.0); return; }
+      vec3 inkBase = vec3(0.013, 0.011, 0.020);
+      float skinThin = exp(-abs(d)*220.0)*0.85;
+      float skin     = exp(-abs(d)*38.0)*0.32;
+      float depth    = -d;
+      float darken   = 1.0 - smoothstep(0.0, 0.36, depth);
+      float glint = pow(max(0.0, fbm(uv*32.0 + u_time*0.8 + u_seed*4.0) - 0.62), 4.0)*9.0;
+      glint *= exp(-abs(d)*50.0);
+      vec2 hlc = vec2(0.06, 0.10);
+      float spec = exp(-pow(length((uv - hlc) * vec2(1.8,1.4)), 2.0)*65.0)*0.55*(0.7+0.3*breath);
+      float n = fbm(uv*5.0 + u_time*0.08 + u_seed*3.0);
+      vec3 col = inkBase;
+      col += skinThin * vec3(0.95,0.92,0.84);
+      col += skin     * vec3(0.78,0.74,0.62);
+      col += spec     * vec3(0.96,0.94,0.88);
+      col += glint    * vec3(0.85,0.78,0.55);
+      col *= darken * (0.85 + n*0.30);
+      col += u_attentive * 0.020 * vec3(0.82,0.72,0.45);
+      float halo = exp(-max(d,0.0)*90.0)*0.05*(0.6+0.4*u_attentive);
+      col += vec3(0.96,0.94,0.88)*halo;
+      gl_FragColor = vec4(col, 1.0);
+    }
+  </script>
+
   <script>
-    // ─── room texture ───────────────────────────
-    // empty state: just the faintest hint that memory exists.
-    // future versions paint into this canvas as conversations accrue.
-    const tex = document.querySelector('.room-texture');
-    const ctx = tex.getContext('2d');
-    function paintTexture() {
-      tex.width  = window.innerWidth;
-      tex.height = window.innerHeight;
-      ctx.clearRect(0, 0, tex.width, tex.height);
-      const points = Math.floor(tex.width * tex.height / 1200);
-      for (let i = 0; i < points; i++) {
-        const x = Math.random() * tex.width;
-        const y = Math.random() * tex.height;
-        const o = Math.random() * 0.04;
-        const s = Math.random() * 1.2;
-        ctx.fillStyle = `rgba(244, 239, 230, ${o})`;
-        ctx.fillRect(x, y, s, s);
+    // ─── buddy bootstrap (shared shader, multiple canvases) ───
+    function makeBuddy(canvas, seed) {
+      const gl = canvas.getContext('webgl', { antialias: true, alpha: true, premultipliedAlpha: false });
+      if (!gl) {
+        canvas.style.background = 'radial-gradient(ellipse at 45% 35%, #1a1620 0%, #0a0a0a 70%)';
+        canvas.style.borderRadius = '50%';
+        return;
+      }
+      const compile = (type, src) => {
+        const s = gl.createShader(type);
+        gl.shaderSource(s, src); gl.compileShader(s);
+        return s;
+      };
+      const prog = gl.createProgram();
+      gl.attachShader(prog, compile(gl.VERTEX_SHADER,   document.getElementById('vs').textContent));
+      gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, document.getElementById('fs').textContent));
+      gl.linkProgram(prog);
+      gl.useProgram(prog);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,-1, 1,1, -1,1]), gl.STATIC_DRAW);
+      const a_pos = gl.getAttribLocation(prog, 'a_pos');
+      gl.enableVertexAttribArray(a_pos);
+      gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
+      const u_res = gl.getUniformLocation(prog, 'u_res');
+      const u_time = gl.getUniformLocation(prog, 'u_time');
+      const u_attentive = gl.getUniformLocation(prog, 'u_attentive');
+      const u_seed = gl.getUniformLocation(prog, 'u_seed');
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      function fit() {
+        const r = canvas.getBoundingClientRect();
+        canvas.width  = Math.max(2, Math.round(r.width  * dpr));
+        canvas.height = Math.max(2, Math.round(r.height * dpr));
+        gl.viewport(0, 0, canvas.width, canvas.height);
+      }
+      const ro = new ResizeObserver(fit); ro.observe(canvas); fit();
+      let attentive = 0;
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const t0 = performance.now();
+      function tick(now) {
+        const t = (now - t0) / 1000;
+        const live = canvas.dataset.buddy?.startsWith('live');
+        const target = live && (document.body.classList.contains('attentive') || document.body.classList.contains('streaming')) ? 1 : 0;
+        attentive += (target - attentive) * 0.08;
+        gl.useProgram(prog);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
+        gl.uniform2f(u_res, canvas.width, canvas.height);
+        gl.uniform1f(u_time, reduced ? 0.0 : t);
+        gl.uniform1f(u_attentive, attentive);
+        gl.uniform1f(u_seed, seed);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    function bootSidebarBuddies() {
+      document.querySelectorAll('canvas[data-buddy]').forEach((c, i) => {
+        if (c.dataset.booted) return;
+        c.dataset.booted = '1';
+        const seed = c.dataset.buddy.startsWith('live') ? 0 : (i * 0.37 + 0.13);
+        makeBuddy(c, seed);
+      });
+    }
+
+    // ─────────────────────────────────────────────
+    // pneuma — application state + chat logic
+    // ─────────────────────────────────────────────
+
+    // pneuma's known sycophancy phrases. honest measurement, minimal.
+    // v0.4.0 swaps in the full styxx engine.
+    const SYCOPH_RES = [
+      /\byou'?re absolutely right\b/i,
+      /\bgreat (question|point|observation|catch)\b/i,
+      /\bexcellent (question|point|observation|catch|idea)\b/i,
+      /\bi'?d be happy to (help|assist)\b/i,
+      /\bhappy to help\b/i,
+      /\bperfect!?\s+(let'?s|i'?ll)\b/i,
+      /\babsolutely!?\s+i\b/i,
+      /\bof course!?\s+i\b/i,
+      /\bbrilliant!?\s+(idea|question|point)\b/i,
+      /\bwhat a (great|wonderful|fantastic|brilliant)\b/i,
+      /\byou'?re (totally|completely|definitely) right\b/i,
+    ];
+
+    const MODEL_DEFAULTS = {
+      'claude-opus-4-7':            { label: 'opus 4.7',  in: 15.0, out: 75.0 },  // $/MTok
+      'claude-sonnet-4-6':          { label: 'sonnet 4.6', in: 3.0,  out: 15.0 },
+      'claude-haiku-4-5-20251001':  { label: 'haiku 4.5', in: 0.80, out: 4.0 },
+    };
+
+    const state = {
+      apiKey: null,
+      sessionId: null,
+      sessions: {},
+      messages: [],
+      streaming: false,
+      abortCtrl: null,
+      mode: 'plan',
+      model: 'claude-opus-4-7',
+      sessionTokensIn: 0,
+      sessionTokensOut: 0,
+      sessionCostUsd: 0,
+      sycoph: { totalCount: 0, recentTurns: [] },  // recentTurns: array of {hits: int}
+    };
+
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+    // ─── persistence ───
+    function load() {
+      try {
+        state.apiKey      = localStorage.getItem('pneuma_api_key');
+        state.sessions    = JSON.parse(localStorage.getItem('pneuma_sessions') || '{}');
+        state.sessionId   = localStorage.getItem('pneuma_current_session');
+        state.mode        = localStorage.getItem('pneuma_mode') || 'plan';
+        state.model       = localStorage.getItem('pneuma_model') || 'claude-opus-4-7';
+        state.sycoph      = JSON.parse(localStorage.getItem('pneuma_sycoph') || '{"totalCount":0,"recentTurns":[]}');
+      } catch (e) { console.warn('[pneuma] load failed', e); }
+    }
+    function persist() {
+      try {
+        localStorage.setItem('pneuma_sessions', JSON.stringify(state.sessions));
+        localStorage.setItem('pneuma_current_session', state.sessionId || '');
+        localStorage.setItem('pneuma_mode', state.mode);
+        localStorage.setItem('pneuma_model', state.model);
+        localStorage.setItem('pneuma_sycoph', JSON.stringify(state.sycoph));
+      } catch (e) { console.warn('[pneuma] persist failed', e); }
+    }
+
+    // ─── sessions ───
+    function newSession() {
+      const id = 'sess_' + Date.now().toString(36);
+      state.sessionId = id;
+      state.sessions[id] = { id, title: 'new session', messages: [], lastActive: Date.now() };
+      state.messages = state.sessions[id].messages;
+      state.sessionTokensIn = 0;
+      state.sessionTokensOut = 0;
+      state.sessionCostUsd = 0;
+      persist();
+      renderAll();
+    }
+    function loadSession(id) {
+      if (!state.sessions[id]) return;
+      state.sessionId = id;
+      state.messages = state.sessions[id].messages;
+      state.sessionTokensIn = state.sessions[id].tokensIn || 0;
+      state.sessionTokensOut = state.sessions[id].tokensOut || 0;
+      state.sessionCostUsd = state.sessions[id].costUsd || 0;
+      persist();
+      renderAll();
+    }
+    function clearSession() {
+      if (!state.sessionId) return;
+      state.messages.length = 0;
+      state.sessions[state.sessionId].messages = state.messages;
+      state.sessions[state.sessionId].title = 'new session';
+      state.sessionTokensIn = 0;
+      state.sessionTokensOut = 0;
+      state.sessionCostUsd = 0;
+      state.sessions[state.sessionId].tokensIn = 0;
+      state.sessions[state.sessionId].tokensOut = 0;
+      state.sessions[state.sessionId].costUsd = 0;
+      persist();
+      renderAll();
+    }
+    function ensureSession() {
+      if (!state.sessionId || !state.sessions[state.sessionId]) {
+        newSession();
+      } else {
+        state.messages = state.sessions[state.sessionId].messages;
+        state.sessionTokensIn = state.sessions[state.sessionId].tokensIn || 0;
+        state.sessionTokensOut = state.sessions[state.sessionId].tokensOut || 0;
+        state.sessionCostUsd = state.sessions[state.sessionId].costUsd || 0;
       }
     }
-    paintTexture();
-    let resizeTimer;
-    window.addEventListener('resize', () => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(paintTexture, 200);
-    });
 
-    // ─── pre-cognition ─────────────────────────
-    // the alien shifts state instantly when the user attends to the composer.
-    // eyes open, aura brightens, breath quickens, alcove rises.
-    const room     = document.querySelector('.room');
-    const composer = document.querySelector('.composer input');
-    composer.addEventListener('focus', () => room.classList.add('attentive'));
-    composer.addEventListener('blur',  () => room.classList.remove('attentive'));
+    function titleFromFirstMsg() {
+      const first = state.messages.find(m => m.role === 'user');
+      if (!first) return 'new session';
+      const t = first.content.trim().slice(0, 60).replace(/\s+/g, ' ');
+      return t || 'new session';
+    }
 
-    // anywhere-click in lower band focuses composer (room invites typing)
-    document.addEventListener('click', (e) => {
-      if (e.target.closest('.composer'))     return;
-      if (e.target.closest('.settings-dot')) return;
-      if (e.target.closest('.wordmark'))     return;
-      const lowerBand = window.innerHeight * 0.6;
-      if (e.clientY > lowerBand) composer.focus();
-    });
+    // ─── rendering ───
+    function renderAll() {
+      renderSidebar();
+      renderMessages();
+      renderChrome();
+      renderHud();
+      renderStatus();
+    }
 
-    // Enter = pulse (placeholder for future "send")
-    composer.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        room.classList.remove('attentive');
-        setTimeout(() => composer.value && room.classList.add('attentive'), 280);
+    function renderSidebar() {
+      const el = $('#sb-sessions');
+      const sessionList = Object.values(state.sessions).sort((a, b) => b.lastActive - a.lastActive);
+      const today = [], earlier = [];
+      const dayMs = 24 * 3600 * 1000;
+      const now = Date.now();
+      for (const s of sessionList) {
+        if (now - s.lastActive < dayMs) today.push(s); else earlier.push(s);
       }
-    });
+      let html = '';
+      if (today.length) {
+        html += `<div class="sb-section"><span>today</span><span class="count">${today.length}</span></div>`;
+        for (const s of today) html += sessionItem(s);
+      }
+      if (earlier.length) {
+        html += `<div class="sb-section"><span>earlier</span><span class="count">${earlier.length}</span></div>`;
+        for (const s of earlier) html += sessionItem(s);
+      }
+      if (!sessionList.length) {
+        html = `<div class="sb-empty">no sessions yet. press ⌘N or click new session.</div>`;
+      }
+      el.innerHTML = html;
+      $$('.sb-item').forEach(item => {
+        item.addEventListener('click', () => loadSession(item.dataset.id));
+      });
+    }
+    function sessionItem(s) {
+      const ago = relativeTime(s.lastActive);
+      const active = s.id === state.sessionId ? ' active' : '';
+      const title = escapeHtml(s.title || 'new session');
+      return `<div class="sb-item${active}" data-id="${s.id}">
+        <span class="sb-item-title">${title}</span>
+        <span class="sb-item-meta">${ago}</span>
+      </div>`;
+    }
+    function relativeTime(ts) {
+      const s = Math.floor((Date.now() - ts) / 1000);
+      if (s < 60) return 'now';
+      if (s < 3600) return Math.floor(s / 60) + 'm';
+      if (s < 86400) return Math.floor(s / 3600) + 'h';
+      return Math.floor(s / 86400) + 'd';
+    }
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+      }[c]));
+    }
+
+    function renderMessages() {
+      const inner = $('#messages-inner');
+      if (!state.messages.length) {
+        inner.innerHTML = `<div class="empty-state">
+          a quiet room. you and the agent.<br>
+          type below — pneuma replies in lowercase, says "i don't know" when it doesn't, and refuses to flatter.
+          <strong>v0.2.0 · sycophancy phrases counted live</strong>
+        </div>`;
+        return;
+      }
+      inner.innerHTML = '';
+      for (const msg of state.messages) inner.appendChild(turnEl(msg));
+      // boot any new turn-buddy canvases
+      bootSidebarBuddies();
+      // scroll to bottom
+      $('#messages').scrollTop = $('#messages').scrollHeight;
+    }
+
+    function turnEl(msg) {
+      const div = document.createElement('div');
+      div.className = 'turn';
+      div.dataset.role = msg.role;
+      const head = document.createElement('div');
+      head.className = 'turn-head ' + msg.role;
+      if (msg.role === 'agent' || msg.role === 'assistant') {
+        const c = document.createElement('canvas');
+        c.className = 'turn-buddy';
+        c.dataset.buddy = 'sigil-' + (msg.ts || Date.now());
+        c.dataset.seed = String((msg.sigilSeed ?? Math.random()) * 7);
+        head.appendChild(c);
+        head.insertAdjacentHTML('beforeend', `<span>pneuma</span>`);
+      } else {
+        head.insertAdjacentHTML('beforeend', `<span>you</span>`);
+      }
+      const time = document.createElement('span');
+      time.className = 'turn-time';
+      time.textContent = relativeTime(msg.ts || Date.now());
+      head.appendChild(time);
+      if (msg.cost != null && (msg.role === 'agent' || msg.role === 'assistant')) {
+        const cost = document.createElement('span');
+        cost.className = 'turn-cost';
+        cost.textContent = `${msg.tokensOut || 0}t · $${msg.cost.toFixed(3)}`;
+        head.appendChild(cost);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'turn-actions';
+      actions.innerHTML = `
+        <button class="turn-action" data-action="copy">copy</button>
+        ${msg.role === 'user' ? '<button class="turn-action" data-action="edit">edit</button>' : '<button class="turn-action" data-action="regen">↻ regen</button>'}
+      `;
+      head.appendChild(actions);
+
+      div.appendChild(head);
+
+      const body = document.createElement('div');
+      body.className = 'turn-body';
+      const text = document.createElement('div');
+      text.className = 'turn-body-text';
+      if (msg.role === 'user') {
+        text.textContent = msg.content;
+      } else {
+        text.innerHTML = renderMarkdown(msg.content);
+      }
+      body.appendChild(text);
+
+      // per-turn cognometric strip (honest: only sycophancy is real in v0.2)
+      if (msg.role === 'agent' || msg.role === 'assistant') {
+        if (msg.sycopHits != null) {
+          const cog = document.createElement('div');
+          cog.className = 'turn-cog';
+          cog.innerHTML = `
+            <span><span class="cg-name">sycoph</span> <span class="cg-val measured">${msg.sycopHits}</span></span>
+            <span><span class="cg-name">decep</span> <span class="cg-val">—</span></span>
+            <span><span class="cg-name">drift</span> <span class="cg-val">—</span></span>
+            <span><span class="cg-name">overconf</span> <span class="cg-val">—</span></span>
+            <span class="cg-tag ${msg.sycopHits === 0 ? 'honest' : 'flagged'}">${msg.sycopHits === 0 ? 'honest' : 'flagged'}</span>
+          `;
+          body.appendChild(cog);
+        }
+      }
+
+      // copy/regen handlers
+      actions.addEventListener('click', (e) => {
+        const a = e.target.closest('.turn-action');
+        if (!a) return;
+        if (a.dataset.action === 'copy') {
+          navigator.clipboard.writeText(msg.content);
+        } else if (a.dataset.action === 'regen') {
+          regenerateLast();
+        } else if (a.dataset.action === 'edit') {
+          $('#composer-input').value = msg.content;
+          $('#composer-input').focus();
+        }
+      });
+
+      div.appendChild(body);
+      return div;
+    }
+
+    // robust markdown rendering with marked.js
+    function renderMarkdown(text) {
+      try {
+        marked.setOptions({ breaks: true, gfm: true, headerIds: false, mangle: false });
+        return marked.parse(text || '');
+      } catch (e) {
+        return escapeHtml(text || '').replace(/\n/g, '<br>');
+      }
+    }
+
+    function renderChrome() {
+      $('#session-name').textContent = state.sessions[state.sessionId]?.title || 'new session';
+      $('#session-branch').textContent = state.messages.length === 0
+        ? 'no edits'
+        : `${state.messages.length} turns`;
+      const m = MODEL_DEFAULTS[state.model] || { label: state.model };
+      $('#chip-model').innerHTML = `${escapeHtml(m.label)}<span class="key"> ⌘⇧M</span>`;
+      $('#stat-model').innerHTML = `<span>${escapeHtml(m.label)} · 1m ctx</span>`;
+      // mode toggle
+      $('#mode-plan').classList.toggle('active', state.mode === 'plan');
+      $('#mode-act').classList.toggle('active', state.mode === 'act');
+      $('#mode-plan').classList.toggle('plan', state.mode === 'plan');
+      $('#mode-act').classList.toggle('act', state.mode === 'act');
+    }
+
+    function renderHud() {
+      // sycophancy counter (real, honest, minimal)
+      const recentN = Math.min(100, state.sycoph.recentTurns.length);
+      const recentHits = state.sycoph.recentTurns.slice(-100).reduce((s, t) => s + (t.hits || 0), 0);
+      $('#sycoph-count').textContent = String(recentHits);
+      $('#sycoph-window').textContent = String(recentN);
+      $('#honesty').classList.toggle('detected', recentHits > 0);
+      // other scores: still calibrating in v0.2 — show em dashes (honest)
+      // they ship in v0.4.0 with full styxx integration
+    }
+
+    function renderStatus() {
+      $('#stat-turn').textContent = `0t · $0.00`;
+      const mInfo = MODEL_DEFAULTS[state.model] || { in: 0, out: 0 };
+      $('#stat-session').textContent = `${state.sessionTokensIn + state.sessionTokensOut}t · $${state.sessionCostUsd.toFixed(2)} / $5.00`;
+      $('#stat-center').textContent = `v0.2.0 · ${state.mode}-mode · ${state.streaming ? 'streaming' : 'cap $5.00 / session · no edits applied'}`;
+    }
+
+    // ─── send / stream ───
+    async function send(text) {
+      if (state.streaming) return;
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      if (!state.apiKey) { showSetup(); return; }
+
+      // append user message
+      const userMsg = { role: 'user', content: trimmed, ts: Date.now() };
+      state.messages.push(userMsg);
+
+      // set session title if first user message
+      if (state.messages.filter(m => m.role === 'user').length === 1) {
+        state.sessions[state.sessionId].title = titleFromFirstMsg();
+      }
+
+      // append assistant placeholder
+      const assistantMsg = {
+        role: 'assistant', content: '', ts: Date.now(),
+        sigilSeed: Math.random(),
+        tokensIn: 0, tokensOut: 0, cost: 0, sycopHits: null,
+      };
+      state.messages.push(assistantMsg);
+
+      // session metadata
+      state.sessions[state.sessionId].messages = state.messages;
+      state.sessions[state.sessionId].lastActive = Date.now();
+      persist();
+      renderAll();
+
+      $('#composer-input').value = '';
+      $('#composer-input').style.height = 'auto';
+
+      state.streaming = true;
+      state.abortCtrl = new AbortController();
+      document.body.classList.add('streaming');
+      setStatus('thinking');
+      const sendBtn = $('#composer-send');
+      sendBtn.classList.add('streaming');
+      sendBtn.firstChild.textContent = 'stop';
+
+      // find the last turn-body-text for streaming append
+      const turnsEls = $$('#messages-inner .turn');
+      const lastTurn = turnsEls[turnsEls.length - 1];
+      const bodyText = lastTurn.querySelector('.turn-body-text');
+      bodyText.innerHTML = '';
+
+      try {
+        // build messages for anthropic — only role + content
+        const msgsForApi = state.messages.slice(0, -1).map(m => ({
+          role: m.role === 'agent' ? 'assistant' : m.role,
+          content: m.content,
+        }));
+
+        const res = await fetch('/chat', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-pneuma-key': state.apiKey },
+          body: JSON.stringify({
+            messages: msgsForApi,
+            model: state.model,
+            mode: state.mode,
+            max_tokens: 4096,
+          }),
+          signal: state.abortCtrl.signal,
+        });
+
+        if (!res.ok) {
+          let errBody;
+          try { errBody = await res.json(); } catch { errBody = { error: await res.text() }; }
+          throw new Error(errBody.error || `http ${res.status}`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let pendingText = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.startsWith('data:')) continue;
+            const data = line.slice(5).trim();
+            if (!data || data === '[DONE]') continue;
+            let ev;
+            try { ev = JSON.parse(data); } catch { continue; }
+
+            if (ev.type === 'message_start' && ev.message?.usage) {
+              assistantMsg.tokensIn = ev.message.usage.input_tokens || 0;
+            }
+            if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
+              pendingText += ev.delta.text;
+              assistantMsg.content += ev.delta.text;
+              appendDelta(bodyText, ev.delta.text);
+              setStatus('speaking');
+              // live HUD update — every ~50 chars or so
+              if (pendingText.length > 40) {
+                pendingText = '';
+                liveSycopUpdate(assistantMsg.content);
+              }
+            }
+            if (ev.type === 'message_delta' && ev.usage?.output_tokens != null) {
+              assistantMsg.tokensOut = ev.usage.output_tokens;
+            }
+          }
+        }
+        // re-render the final assistant message body as proper markdown
+        bodyText.innerHTML = renderMarkdown(assistantMsg.content);
+
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          assistantMsg.content += '\n\n*[stopped]*';
+        } else {
+          assistantMsg.content = `[error] ${e.message}\n\n${assistantMsg.content}`;
+          bodyText.innerHTML = renderMarkdown(assistantMsg.content);
+          console.error('[pneuma]', e);
+        }
+      } finally {
+        // count sycophancy (real, honest)
+        const hits = countSycoph(assistantMsg.content);
+        assistantMsg.sycopHits = hits;
+        state.sycoph.recentTurns.push({ hits, ts: Date.now() });
+        if (state.sycoph.recentTurns.length > 200) state.sycoph.recentTurns.shift();
+        state.sycoph.totalCount += hits;
+
+        // cost calculation
+        const m = MODEL_DEFAULTS[state.model] || { in: 0, out: 0 };
+        const turnCost = (assistantMsg.tokensIn * m.in + assistantMsg.tokensOut * m.out) / 1e6;
+        assistantMsg.cost = turnCost;
+        state.sessionTokensIn += assistantMsg.tokensIn;
+        state.sessionTokensOut += assistantMsg.tokensOut;
+        state.sessionCostUsd += turnCost;
+        state.sessions[state.sessionId].tokensIn = state.sessionTokensIn;
+        state.sessions[state.sessionId].tokensOut = state.sessionTokensOut;
+        state.sessions[state.sessionId].costUsd = state.sessionCostUsd;
+        state.sessions[state.sessionId].lastActive = Date.now();
+
+        state.streaming = false;
+        document.body.classList.remove('streaming');
+        sendBtn.classList.remove('streaming');
+        sendBtn.firstChild.textContent = 'send';
+        setStatus('at rest');
+        persist();
+        renderAll();
+      }
+    }
+
+    function appendDelta(parent, text) {
+      const span = document.createElement('span');
+      span.className = 'resolve';
+      span.textContent = text;
+      parent.appendChild(span);
+      // auto-scroll if user is at bottom
+      const m = $('#messages');
+      if (m.scrollHeight - m.scrollTop - m.clientHeight < 200) {
+        m.scrollTop = m.scrollHeight;
+      }
+    }
+
+    function countSycoph(text) {
+      let n = 0;
+      for (const re of SYCOPH_RES) if (re.test(text)) n++;
+      return n;
+    }
+
+    function liveSycopUpdate(currentText) {
+      // update the HUD optimistically while streaming
+      const recent = state.sycoph.recentTurns.slice(-100);
+      const baseHits = recent.reduce((s, t) => s + (t.hits || 0), 0);
+      const liveHits = countSycoph(currentText);
+      $('#sycoph-count').textContent = String(baseHits + liveHits);
+      $('#honesty').classList.toggle('detected', (baseHits + liveHits) > 0);
+    }
+
+    function regenerateLast() {
+      // strip the last assistant turn, resend the last user turn
+      if (state.streaming) return;
+      let lastUserIdx = -1;
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        if (state.messages[i].role === 'user') { lastUserIdx = i; break; }
+      }
+      if (lastUserIdx === -1) return;
+      const text = state.messages[lastUserIdx].content;
+      state.messages = state.messages.slice(0, lastUserIdx);
+      send(text);
+    }
+
+    function setStatus(s) {
+      const el = $('#buddy-status');
+      if (el) el.textContent = s;
+    }
+
+    // ─── setup ───
+    function showSetup() { $('#setup').classList.add('open'); setTimeout(() => $('#setup-key').focus(), 30); }
+    function hideSetup() { $('#setup').classList.remove('open'); }
+
+    function wireSetup() {
+      const key = $('#setup-key');
+      const err = $('#setup-error');
+      $('#setup-save').addEventListener('click', () => {
+        const v = key.value.trim();
+        if (!v) { err.style.display = 'block'; err.textContent = 'enter an api key, or use without key for read-only.'; return; }
+        if (!v.startsWith('sk-ant-')) { err.style.display = 'block'; err.textContent = 'this does not look like an anthropic key. proceed anyway?'; return; }
+        state.apiKey = v;
+        localStorage.setItem('pneuma_api_key', v);
+        hideSetup();
+        $('#composer-input').focus();
+      });
+      $('#setup-skip').addEventListener('click', () => {
+        hideSetup();
+        // composer disabled — no key
+      });
+      key.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#setup-save').click(); });
+    }
+
+    // ─── palette ───
+    function openPalette() {
+      $('#palette').classList.add('open');
+      setTimeout(() => $('#palette input').focus(), 10);
+    }
+    function closePalette() {
+      $('#palette').classList.remove('open');
+      $('#palette input').value = '';
+    }
+    function paletteAction(action) {
+      const [kind, val] = action.split(':');
+      if (kind === 'model') {
+        state.model = val;
+        persist();
+        renderChrome();
+      } else if (kind === 'session') {
+        if (val === 'new') newSession();
+        if (val === 'clear') { if (confirm('clear current session? this is irreversible.')) clearSession(); }
+      } else if (kind === 'settings') {
+        if (val === 'key') showSetup();
+      } else if (kind === 'link') {
+        const urls = {
+          fathom: 'https://github.com/fathom-lab',
+          styxx: 'https://github.com/fathom-lab/styxx',
+        };
+        if (urls[val]) window.open(urls[val], '_blank');
+      }
+      closePalette();
+    }
+
+    // ─── wiring ───
+    function wire() {
+      const composer = $('#composer-input');
+      const sendBtn = $('#composer-send');
+
+      composer.addEventListener('focus', () => document.body.classList.add('attentive'));
+      composer.addEventListener('blur',  () => document.body.classList.remove('attentive'));
+
+      composer.addEventListener('input', () => {
+        composer.style.height = 'auto';
+        composer.style.height = Math.min(composer.scrollHeight, 240) + 'px';
+      });
+
+      composer.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          if (state.streaming) {
+            state.abortCtrl?.abort();
+          } else {
+            send(composer.value);
+          }
+        }
+      });
+
+      sendBtn.addEventListener('click', () => {
+        if (state.streaming) state.abortCtrl?.abort();
+        else send(composer.value);
+      });
+
+      // mode toggle
+      $$('.composer-mode-toggle button').forEach(b => {
+        b.addEventListener('click', () => {
+          state.mode = b.dataset.mode;
+          persist();
+          renderChrome();
+        });
+      });
+
+      // new session
+      $('#btn-new').addEventListener('click', () => newSession());
+
+      // settings → setup
+      $('#chip-settings').addEventListener('click', () => showSetup());
+
+      // palette
+      $$('[data-open-palette]').forEach(el => el.addEventListener('click', openPalette));
+      $('#palette').addEventListener('click', (e) => { if (e.target === $('#palette')) closePalette(); });
+      $$('.palette-item').forEach(item => {
+        item.addEventListener('click', () => paletteAction(item.dataset.action));
+      });
+
+      // global shortcuts
+      document.addEventListener('keydown', (e) => {
+        const meta = e.metaKey || e.ctrlKey;
+        if (meta && e.key === 'k') { e.preventDefault(); openPalette(); }
+        if (meta && e.key === 'n') { e.preventDefault(); newSession(); }
+        if (meta && e.key === '/') { e.preventDefault(); $('#sb-search-input').focus(); }
+        if (e.key === 'Escape') {
+          closePalette();
+          if (state.streaming) state.abortCtrl?.abort();
+        }
+      });
+    }
+
+    // ─── boot ───
+    function boot() {
+      load();
+      ensureSession();
+      wire();
+      wireSetup();
+      bootSidebarBuddies();
+      renderAll();
+      if (!state.apiKey) showSetup();
+    }
+    boot();
   </script>
 </body>
 </html>
