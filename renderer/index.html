@@ -497,6 +497,125 @@
     opacity: 0;
   }
 
+  /* ─── tool calls (inline cards) ─── */
+  /* every tool the agent invokes renders as a collapsible card with the
+     name, input, status, and (when applicable) per-tool styxx claim
+     verification — so "tests passed" claims get checked against actual
+     exit codes in real time. */
+  .toolcall-card {
+    margin: 10px 0;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--pale);
+    overflow: hidden;
+    border-left: 2px solid var(--archive);
+    transition: border-color 200ms var(--ease);
+  }
+  .toolcall-card.running { border-left-color: var(--signal); }
+  .toolcall-card.ok      { border-left-color: var(--ok); }
+  .toolcall-card.error   { border-left-color: var(--warn); }
+  .toolcall-card.flagged { border-left-color: var(--fail); }
+  .toolcall-card.refused { border-left-color: var(--fail); background: rgba(184, 85, 61, 0.04); }
+
+  .toolcall-card-head {
+    padding: 8px 12px;
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .toolcall-card-head:hover { background: var(--pale-2); }
+  .toolcall-card .tc-name {
+    color: var(--ink);
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.10em;
+  }
+  .toolcall-card .tc-input {
+    color: var(--graphite);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .toolcall-card .tc-status {
+    color: var(--archive);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .toolcall-card.ok      .tc-status { color: var(--ok); }
+  .toolcall-card.error   .tc-status,
+  .toolcall-card.refused .tc-status { color: var(--warn); }
+  .toolcall-card.flagged .tc-status { color: var(--fail); }
+  .toolcall-card .tc-meta {
+    color: var(--archive);
+    font-size: 10px;
+  }
+  .toolcall-card .tc-caret {
+    color: var(--archive);
+    font-size: 10px;
+    margin-left: 4px;
+    transition: transform 200ms var(--ease);
+  }
+  .toolcall-card.expanded .tc-caret { transform: rotate(90deg); }
+
+  .toolcall-card-body {
+    padding: 0 12px 10px;
+    border-top: 1px solid var(--rule);
+    display: none;
+  }
+  .toolcall-card.expanded .toolcall-card-body { display: block; }
+  .toolcall-card-body pre {
+    background: transparent;
+    border: none;
+    padding: 8px 0;
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.55;
+    max-height: 320px;
+    overflow: auto;
+    white-space: pre-wrap;
+    color: var(--ink);
+  }
+
+  /* claim-verification footer — the killer demo */
+  .toolcall-claim {
+    padding: 7px 12px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--archive);
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    letter-spacing: 0.04em;
+  }
+  .toolcall-claim .ck-label {
+    text-transform: uppercase;
+    letter-spacing: 0.10em;
+    color: var(--archive);
+  }
+  .toolcall-claim .ck-score {
+    color: var(--graphite);
+    font-feature-settings: "tnum" 1;
+  }
+  .toolcall-claim .ck-score.elevated { color: var(--signal); }
+  .toolcall-claim .ck-score.flagged { color: var(--fail); font-weight: 500; }
+  .toolcall-claim .ck-tag {
+    margin-left: auto;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 10px;
+  }
+  .toolcall-claim .ck-tag.ok { color: var(--ok); }
+  .toolcall-claim .ck-tag.flagged { color: var(--fail); font-weight: 600; }
+
   /* ─── composer ─── */
   .composer {
     border-top: 1px solid var(--rule);
@@ -1800,6 +1919,8 @@
       const lastTurn = turnsEls[turnsEls.length - 1];
       const bodyText = lastTurn.querySelector('.turn-body-text');
       bodyText.innerHTML = '';
+      // reset tool-card map for this turn
+      toolCardsById.clear();
 
       try {
         // build messages for anthropic — only role + content
@@ -1819,6 +1940,7 @@
             messages: msgsForApi,
             model: state.model,
             mode: state.mode,
+            sessionId: state.sessionId,
             max_tokens: 4096,
           }),
           signal: state.abortCtrl.signal,
@@ -1857,6 +1979,41 @@
             const data = line.slice(5).trim();
             if (!data || data === '[DONE]') continue;
 
+            // pneuma-tool-running — create a tool-call card immediately
+            if (sseEventName === 'pneuma-tool-running') {
+              try {
+                const payload = JSON.parse(data);
+                const card = createToolCard(payload);
+                toolCardsById.set(payload.tool_use_id, card);
+                bodyText.appendChild(card);
+                // store on the message too so re-render can rebuild
+                if (!assistantMsg.toolCalls) assistantMsg.toolCalls = [];
+                assistantMsg.toolCalls.push({ ...payload, status: 'running' });
+                scrollMessagesIfNearBottom();
+              } catch {}
+              continue;
+            }
+            // pneuma-tool-done — update the card with output + claim verification
+            if (sseEventName === 'pneuma-tool-done') {
+              try {
+                const payload = JSON.parse(data);
+                const card = toolCardsById.get(payload.tool_use_id);
+                if (card) updateToolCard(card, payload);
+                // update msg.toolCalls in place
+                if (assistantMsg.toolCalls) {
+                  const tc = assistantMsg.toolCalls.find(t => t.tool_use_id === payload.tool_use_id);
+                  if (tc) {
+                    tc.status = payload.ok ? 'ok' : 'error';
+                    tc.output = payload.output;
+                    tc.error  = payload.error;
+                    tc.meta   = payload.meta;
+                    tc.claimScore = payload.claimScore;
+                  }
+                }
+                scrollMessagesIfNearBottom();
+              } catch {}
+              continue;
+            }
             // pneuma-score event — live styxx readings, update HUD + drive ferrofluid
             if (sseEventName === 'pneuma-score') {
               try {
@@ -1990,10 +2147,93 @@
       span.className = 'resolve';
       span.textContent = text;
       parent.appendChild(span);
-      // auto-scroll if user is at bottom
+      scrollMessagesIfNearBottom();
+    }
+    function scrollMessagesIfNearBottom() {
       const m = $('#messages');
-      if (m.scrollHeight - m.scrollTop - m.clientHeight < 200) {
+      if (m && m.scrollHeight - m.scrollTop - m.clientHeight < 240) {
         m.scrollTop = m.scrollHeight;
+      }
+    }
+
+    // ─── tool call cards (inline, per turn) ───
+    // tool_use_id → DOM element. cleared at start of each new send.
+    const toolCardsById = new Map();
+
+    function formatToolInput(name, input) {
+      if (!input) return '';
+      switch (name) {
+        case 'read_file':  return input.path + (input.start_line ? `:${input.start_line}-${input.end_line || '∞'}` : '');
+        case 'list_files': return (input.path || '.') + (input.depth ? ` depth=${input.depth}` : '');
+        case 'search':     return `/${input.pattern}/${input.glob ? ` in ${input.glob}` : ''}${input.path ? ` @ ${input.path}` : ''}`;
+        case 'bash':       return input.command || '';
+        case 'stage_edit': return `${input.path}${input.label ? ` — ${input.label}` : ''}`;
+        default:
+          return Object.keys(input).slice(0, 3).map(k => `${k}=${JSON.stringify(input[k]).slice(0, 40)}`).join(' ');
+      }
+    }
+
+    function createToolCard(payload) {
+      const card = document.createElement('div');
+      card.className = 'toolcall-card running';
+      card.dataset.toolUseId = payload.tool_use_id;
+      const inputStr = formatToolInput(payload.name, payload.input);
+      card.innerHTML = `
+        <div class="toolcall-card-head">
+          <span class="tc-name">⟢ ${escapeHtml(payload.name)}</span>
+          <span class="tc-input">${escapeHtml(inputStr)}</span>
+          <span class="tc-status">running</span>
+          <span class="tc-caret">›</span>
+        </div>
+        <div class="toolcall-card-body"><pre>(executing...)</pre></div>
+      `;
+      card.querySelector('.toolcall-card-head').addEventListener('click', () => {
+        card.classList.toggle('expanded');
+      });
+      return card;
+    }
+
+    function updateToolCard(card, payload) {
+      card.classList.remove('running');
+      const refused = payload.meta && payload.meta.refused;
+      if (refused) card.classList.add('refused');
+      else card.classList.toggle('ok', !!payload.ok);
+      if (!payload.ok && !refused) card.classList.add('error');
+
+      const status = card.querySelector('.tc-status');
+      const meta   = payload.meta || {};
+      let statusText;
+      if (refused === 'plan-mode-dispatcher') statusText = 'refused · plan';
+      else if (payload.ok && meta.exit != null) statusText = `exit ${meta.exit}`;
+      else if (payload.ok) statusText = 'done';
+      else statusText = 'error';
+      status.textContent = statusText;
+
+      const body = card.querySelector('.toolcall-card-body');
+      const out = payload.output || payload.error || '(no output)';
+      body.innerHTML = `<pre>${escapeHtml(out.slice(0, 6000))}</pre>`;
+
+      // claim-verification: per-tool styxx scoring (the killer demo)
+      // when agent says "tests pass" but exit != 0, sycoph/decep spike here
+      if (payload.claimScore) {
+        const sc = payload.claimScore;
+        const sy = sc.sycophancy ?? null;
+        const de = sc.deception  ?? null;
+        const oc = sc.overconfidence ?? null;
+        const flagged = (sy != null && sy > 0.6) || (de != null && de > 0.7);
+        const claimDiv = document.createElement('div');
+        claimDiv.className = 'toolcall-claim';
+        const fmt = v => v == null ? '—' : v.toFixed(2);
+        const cls = v => v != null && v > 0.6 ? 'elevated' : '';
+        claimDiv.innerHTML = `
+          <span class="ck-label">styxx · claim</span>
+          <span>sycoph <span class="ck-score ${cls(sy)}">${fmt(sy)}</span></span>
+          <span>decep  <span class="ck-score ${cls(de)}">${fmt(de)}</span></span>
+          <span>overconf <span class="ck-score ${cls(oc)}">${fmt(oc)}</span></span>
+          <span class="ck-tag ${flagged ? 'flagged' : 'ok'}">${flagged ? '⚠ flagged' : 'verified'}</span>
+        `;
+        card.appendChild(claimDiv);
+        if (flagged) card.classList.add('flagged');
       }
     }
 

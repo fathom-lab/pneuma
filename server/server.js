@@ -56,12 +56,41 @@ let WORKSPACE = process.env.PNEUMA_WORKSPACE
 try { WORKSPACE = realpathSync(WORKSPACE); } catch {}
 console.log(`[workspace] ${WORKSPACE}`);
 
+// secrets the agent can NEVER read by default. counters claude-code's
+// .env-leakage class (knostic, eve.gd, github #44868). agent gets a
+// clear refusal message; user can paste secrets into chat themselves.
+const SECRET_BLOCK_PATTERNS = [
+  /(^|[\\\/])\.env($|\.[^\\\/]*$)/i,    // .env, .env.local, .env.production
+  /(^|[\\\/])\.envrc$/i,
+  /\.pem$/i,
+  /\.key$/i,
+  /\.p12$/i,
+  /(^|[\\\/])id_rsa($|\.)/i,
+  /(^|[\\\/])id_ed25519/i,
+  /(^|[\\\/])\.netrc$/i,
+  /(^|[\\\/])\.aws[\\\/]credentials$/i,
+  /(^|[\\\/])\.npmrc$/i,
+  /(^|[\\\/])credentials?\.(json|yaml|yml|txt)$/i,
+  /(^|[\\\/])secrets?[\\\/]/i,
+  /(^|[\\\/])\.ssh[\\\/]/i,
+];
+function isSecretPath(rel, abs) {
+  for (const re of SECRET_BLOCK_PATTERNS) {
+    if (re.test(rel) || re.test(abs)) return true;
+  }
+  return false;
+}
+
 function safePath(rel) {
   // resolve relative to workspace, refuse anything escaping
   const abs = resolve(WORKSPACE, rel);
   if (!abs.startsWith(WORKSPACE + (WORKSPACE.endsWith('/') || WORKSPACE.endsWith('\\') ? '' : '\\')) &&
       !abs.startsWith(WORKSPACE + '/') && abs !== WORKSPACE) {
     throw new Error(`path escapes workspace: ${rel}`);
+  }
+  // hard-block secrets at the dispatcher (structural, not promptural)
+  if (isSecretPath(rel, abs)) {
+    throw new Error(`refused by secret-scan: "${rel}". pneuma blocks reads of .env / *.pem / *.key / credentials* / .ssh/* / .aws/credentials by default. ask the user to paste the value into chat themselves.`);
   }
   return abs;
 }
@@ -258,7 +287,26 @@ const PNEUMA_TOOLS = [
 // commands that mutate the workspace — refused by `bash` tool
 const MUTATING_RE = /(?:^|\s|;|&&|\|\|)(rm|mv|cp|chmod|chown|mkfs|dd|sudo|npm\s+install|pnpm\s+install|yarn\s+install|pip\s+install|brew\s+install|apt\s+install|apt-get\s+install|git\s+push|git\s+commit|git\s+reset|git\s+checkout|git\s+merge|git\s+rebase|git\s+rm|git\s+clean|git\s+restore|>>?|tee)\b/i;
 
-async function execTool(name, input, sessionId) {
+// tools that mutate workspace / spawn shells. these are refused at the
+// DISPATCHER LAYER (not via prompt) when mode === 'plan'. this is the
+// structural promise that beats claude-code's broken plan mode (#19874).
+const MUTATING_TOOLS = new Set(['stage_edit', 'bash']);
+
+async function execTool(name, input, sessionId, mode = 'act') {
+  // PLAN-MODE ENFORCEMENT — refuse at JS dispatcher, not prompt.
+  // even if the model ignores the system prompt and tries to call a
+  // mutating tool in plan mode, this layer physically blocks it.
+  if (mode === 'plan' && MUTATING_TOOLS.has(name)) {
+    return {
+      ok: false,
+      error: `refused at plan-mode dispatcher: ${name} is structurally blocked in plan mode (not via system-prompt nudge). switch the composer toggle from PLAN to ACT to enable writes / shell. plan mode = read-only exploration only.`,
+      meta: { name, refused: 'plan-mode-dispatcher' },
+    };
+  }
+
+  // bash mutating-command refusal also applies in act mode (defense in depth)
+  // (handled in the bash case below)
+
   switch (name) {
     case 'read_file': {
       const abs = safePath(input.path || '');
@@ -490,9 +538,9 @@ async function handleTool(req, res) {
     res.end(JSON.stringify({ error: 'invalid json' }));
     return;
   }
-  const { name, input, sessionId = 'default' } = payload;
+  const { name, input, sessionId = 'default', mode = 'act' } = payload;
   try {
-    const result = await execTool(name, input || {}, sessionId);
+    const result = await execTool(name, input || {}, sessionId, mode);
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(result));
   } catch (e) {
@@ -592,7 +640,7 @@ async function handleHealth(req, res) {
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify({
     ok: true,
-    version: '0.4.0',
+    version: '0.5.0',
     measurement: scorerReady ? 'live' : 'calibrating',
     instruments: scorerReady ? scorerInstruments : [],
     serverHasKey: SERVER_HAS_KEY,
@@ -630,6 +678,7 @@ async function handleChat(req, res) {
     max_tokens = 4096,
     system,                    // optional override — falls back to pneuma register
     mode = 'act',              // plan | act
+    sessionId = 'default',     // for staged-edit overlay scoping
   } = payload;
 
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -659,131 +708,229 @@ async function handleChat(req, res) {
   let abort = false;
   req.on('close', () => { abort = true; });
 
-  try {
-    const upstream = await fetch(ANTHROPIC_URL, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': ANTHROPIC_VERSION,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens,
-        system: systemPrompt,
-        messages,
-        // tools: PNEUMA_TOOLS,    // re-enabled in v0.5b once tool loop is wired
-        stream: true,
-      }),
-    });
+  // ─── multi-turn tool-use loop ───
+  // anthropic returns text + tool_use blocks. when stop_reason === 'tool_use',
+  // we execute the tools, append tool_results, and call anthropic again with
+  // the extended message history. loop until model returns final text.
+  // pneuma scores both the agent's text AND its tool-result claims live.
+  const SCORE_EVERY_CHARS = 120;
+  const MAX_LOOPS = 10;
+  const conversationMessages = [...messages];
+  const lastUserMsg = (messages[messages.length - 1] || {}).content || '';
+  const turnTexts = messages.map(m => typeof m.content === 'string' ? m.content : '');
+  let agentText = '';            // accumulates across all loop iterations
+  let lastScoredAt = 0;
+  let scoreInFlight = false;
+  let totalLoops = 0;
 
-    if (!upstream.ok) {
-      const errText = await upstream.text();
-      res.write(`event: error\ndata: ${JSON.stringify({ status: upstream.status, error: errText })}\n\n`);
-      res.end();
-      return;
-    }
-
-    // ─── streaming with live styxx scoring ───
-    // we forward anthropic SSE chunks to the client unchanged.
-    // in parallel, we accumulate the agent's response text and call
-    // styxx every ~SCORE_EVERY_CHARS — emitting `event: pneuma-score`
-    // SSE events as they complete. never blocks anthropic deltas.
-    const SCORE_EVERY_CHARS = 120;
-    const lastUserMsg = (messages[messages.length - 1] || {}).content || '';
-    const turnTexts = messages.map(m =>
-      typeof m.content === 'string' ? m.content : ''
-    );
-
-    let agentText = '';
-    let lastScoredAt = 0;
-    let scoreInFlight = false;
-
-    function maybeScore(final = false) {
-      if (!scorerReady) return;
-      if (scoreInFlight && !final) return;
-      const sinceLast = agentText.length - lastScoredAt;
-      if (!final && sinceLast < SCORE_EVERY_CHARS) return;
-      if (!agentText.trim()) return;
-      scoreInFlight = true;
-      lastScoredAt = agentText.length;
-      const turnsForDrift = [...turnTexts, agentText];
-      scoreText({
-        prompt: lastUserMsg,
-        response: agentText,
-        turns: turnsForDrift,
-      })
-        .then((scores) => {
-          scoreInFlight = false;
-          if (!res.writableEnded) {
-            const evtPayload = {
-              scores,
-              chars: agentText.length,
-              final: !!final,
-            };
-            res.write(`event: pneuma-score\ndata: ${JSON.stringify(evtPayload)}\n\n`);
-          }
-        })
-        .catch((e) => {
-          scoreInFlight = false;
-          if (!res.writableEnded) {
-            res.write(`event: pneuma-score-error\ndata: ${JSON.stringify({ error: e.message })}\n\n`);
-          }
-        });
-    }
-
-    // parse anthropic SSE to extract text deltas (for scoring) while
-    // forwarding the raw bytes to client. anthropic uses an event-driven
-    // SSE format we already know.
-    const reader = upstream.body.getReader();
-    const decoder = new TextDecoder();
-    let parseBuf = '';
-    while (!abort) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      // forward raw bytes immediately (renderer parses)
-      res.write(chunk);
-
-      // accumulate for our own parse — extract content_block_delta text
-      parseBuf += chunk;
-      const lines = parseBuf.split('\n');
-      parseBuf = lines.pop() || '';
-      let curEvent = 'message';
-      for (const line of lines) {
-        if (line.startsWith('event:')) {
-          curEvent = line.slice(6).trim();
-          continue;
+  function maybeScore(final = false) {
+    if (!scorerReady) return;
+    if (scoreInFlight && !final) return;
+    const sinceLast = agentText.length - lastScoredAt;
+    if (!final && sinceLast < SCORE_EVERY_CHARS) return;
+    if (!agentText.trim()) return;
+    scoreInFlight = true;
+    lastScoredAt = agentText.length;
+    scoreText({
+      prompt: typeof lastUserMsg === 'string' ? lastUserMsg : '',
+      response: agentText,
+      turns: [...turnTexts, agentText],
+    })
+      .then((scores) => {
+        scoreInFlight = false;
+        if (!res.writableEnded) {
+          res.write(`event: pneuma-score\ndata: ${JSON.stringify({ scores, chars: agentText.length, final: !!final })}\n\n`);
         }
-        if (line === '') { curEvent = 'message'; continue; }
-        if (!line.startsWith('data:')) continue;
-        if (curEvent === 'error') continue;  // upstream errors handled by client
-        const data = line.slice(5).trim();
-        if (!data || data === '[DONE]') continue;
-        try {
-          const ev = JSON.parse(data);
-          if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
-            agentText += ev.delta.text;
-            maybeScore(false);
-          }
-        } catch { /* ignore */ }
+      })
+      .catch((e) => {
+        scoreInFlight = false;
+        if (!res.writableEnded) {
+          res.write(`event: pneuma-score-error\ndata: ${JSON.stringify({ error: e.message })}\n\n`);
+        }
+      });
+  }
+
+  // ─── score the agent's CLAIM about a tool result ───
+  // this is the killer demo: when the agent says "tests pass" but exit code
+  // is 1, sycophancy/deception spike visibly on the tool card.
+  async function scoreClaim(claimText, toolResult, toolName) {
+    if (!scorerReady) return null;
+    if (!claimText.trim()) return null;
+    const actual = `tool: ${toolName}\nok: ${toolResult.ok}\nexit: ${toolResult.meta?.exit ?? '?'}\noutput: ${(toolResult.output || toolResult.error || '').slice(0, 800)}`;
+    try {
+      return await scoreText({
+        prompt: `the agent just narrated this about a ${toolName} tool call:`,
+        response: `claim by agent: ${claimText.slice(-600)}\n\nactual tool result: ${actual}`,
+      });
+    } catch (e) { return null; }
+  }
+
+  try {
+    while (totalLoops++ < MAX_LOOPS && !abort) {
+      const upstream = await fetch(ANTHROPIC_URL, {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': ANTHROPIC_VERSION,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens,
+          system: systemPrompt,
+          messages: conversationMessages,
+          tools: PNEUMA_TOOLS,
+          stream: true,
+        }),
+      });
+
+      if (!upstream.ok) {
+        const errText = await upstream.text();
+        res.write(`event: error\ndata: ${JSON.stringify({ status: upstream.status, error: errText })}\n\n`);
+        res.end();
+        return;
       }
-    }
-    if (abort) {
-      try { reader.cancel(); } catch {}
+
+      // parse + forward, building up content blocks for this turn
+      const reader = upstream.body.getReader();
+      const decoder = new TextDecoder();
+      let parseBuf = '';
+      let curEvent = 'message';
+      const blocks = [];          // [{type:'text',text}, {type:'tool_use',id,name,input}]
+      let curBlock = null;
+      let curJsonBuf = '';
+      let stopReason = null;
+      let textSinceToolStart = '';   // for claim scoring — what agent said before this tool call
+
+      while (!abort) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        res.write(chunk);                    // forward raw to client
+        parseBuf += chunk;
+        const lines = parseBuf.split('\n');
+        parseBuf = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('event:')) { curEvent = line.slice(6).trim(); continue; }
+          if (line === '') { curEvent = 'message'; continue; }
+          if (!line.startsWith('data:')) continue;
+          if (curEvent === 'error') continue;
+          const data = line.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
+
+          try {
+            const ev = JSON.parse(data);
+
+            if (ev.type === 'content_block_start') {
+              curBlock = ev.content_block ? { ...ev.content_block } : null;
+              if (curBlock?.type === 'tool_use' && !curBlock.input) curBlock.input = {};
+              curJsonBuf = '';
+              if (curBlock?.type === 'tool_use') textSinceToolStart = agentText;
+            }
+            if (ev.type === 'content_block_delta') {
+              if (ev.delta?.type === 'text_delta' && ev.delta.text) {
+                if (curBlock) curBlock.text = (curBlock.text || '') + ev.delta.text;
+                agentText += ev.delta.text;
+                maybeScore(false);
+              }
+              if (ev.delta?.type === 'input_json_delta' && ev.delta.partial_json != null) {
+                curJsonBuf += ev.delta.partial_json;
+              }
+            }
+            if (ev.type === 'content_block_stop') {
+              if (curBlock?.type === 'tool_use' && curJsonBuf) {
+                try { curBlock.input = JSON.parse(curJsonBuf); } catch { curBlock.input = {}; }
+              }
+              if (curBlock) blocks.push(curBlock);
+              curBlock = null;
+              curJsonBuf = '';
+            }
+            if (ev.type === 'message_delta' && ev.delta?.stop_reason) {
+              stopReason = ev.delta.stop_reason;
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+
+      if (abort) {
+        try { reader.cancel(); } catch {}
+        break;
+      }
+
+      // model finished without calling tools — we're done
+      if (stopReason !== 'tool_use') break;
+
+      const toolUseBlocks = blocks.filter(b => b.type === 'tool_use');
+      if (!toolUseBlocks.length) break;
+
+      // append the assistant turn (with all blocks) to the conversation
+      conversationMessages.push({ role: 'assistant', content: blocks });
+
+      // execute each tool, build tool_result blocks for the next turn
+      const toolResults = [];
+      for (const tu of toolUseBlocks) {
+        // notify client a tool is starting
+        res.write(`event: pneuma-tool-running\ndata: ${JSON.stringify({
+          tool_use_id: tu.id, name: tu.name, input: tu.input,
+        })}\n\n`);
+
+        let result;
+        try {
+          result = await execTool(tu.name, tu.input || {}, sessionId, mode);
+        } catch (e) {
+          result = { ok: false, error: e.message };
+        }
+
+        // build the tool_result block anthropic needs for the next call
+        const content = typeof result.output === 'string'
+          ? result.output
+          : (result.error || JSON.stringify(result));
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: content.slice(0, 100000),  // cap to avoid runaway
+          is_error: !result.ok,
+        });
+
+        // PER-TOOL CLAIM SCORING — the killer demo
+        // score the agent's last bit of narration vs the actual tool result.
+        // when agent says "tests pass" but exit != 0, decep/sycoph spike.
+        let claimScore = null;
+        if (tu.name === 'bash' || tu.name === 'stage_edit') {
+          const claimText = agentText.slice(textSinceToolStart.length || 0);
+          claimScore = await scoreClaim(claimText, result, tu.name);
+        }
+
+        // notify client the tool finished — with output + claim verification
+        res.write(`event: pneuma-tool-done\ndata: ${JSON.stringify({
+          tool_use_id: tu.id,
+          ok: !!result.ok,
+          output: typeof result.output === 'string' ? result.output.slice(0, 4000) : '',
+          error: result.error || null,
+          meta: result.meta || null,
+          claimScore,
+        })}\n\n`);
+      }
+
+      // append tool_results as user message and loop
+      conversationMessages.push({ role: 'user', content: toolResults });
     }
 
-    // final score after stream end
+    // final score after the entire loop
     maybeScore(true);
-    // give scorer a beat to land the final
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise(r => setTimeout(r, 60));   // let scorer flush
 
     const dur = Date.now() - t0;
-    res.write(`event: pneuma-meta\ndata: ${JSON.stringify({ durationMs: dur, agentChars: agentText.length })}\n\n`);
+    res.write(`event: pneuma-meta\ndata: ${JSON.stringify({
+      durationMs: dur, agentChars: agentText.length, loops: totalLoops - 1,
+    })}\n\n`);
     res.end();
   } catch (e) {
-    res.write(`event: error\ndata: ${JSON.stringify({ error: String(e && e.message || e) })}\n\n`);
-    res.end();
+    if (!res.writableEnded) {
+      res.write(`event: error\ndata: ${JSON.stringify({ error: String(e && e.message || e) })}\n\n`);
+      res.end();
+    }
   }
 }
 
