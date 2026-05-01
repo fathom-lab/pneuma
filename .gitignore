@@ -1,0 +1,44 @@
+# deps
+node_modules/
+dist/
+build/
+
+# secrets — never commit
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+
+# os
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# electron-builder
+dist_electron/
+release/
+out/
+
+# python (bundled styxx)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# tmp
+tmp/
+*.tmp
+.cache/
