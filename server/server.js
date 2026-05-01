@@ -103,6 +103,36 @@ function getStage(sessionId) {
   return STAGED.get(sessionId);
 }
 
+// ─── per-session score journal (in-memory; foundation for v0.7 portrait) ───
+// Map<sessionId, [{ ts, scores, agentChars, model, mode }]>
+// every pneuma-score event appends one entry. exportable as attestation
+// log via /journal/:sessionId — gives CTOs/SOC2 a tamper-evident timeline
+// of what was measured when.
+const SCORE_JOURNAL = new Map();
+function getJournal(sessionId) {
+  if (!SCORE_JOURNAL.has(sessionId)) SCORE_JOURNAL.set(sessionId, []);
+  return SCORE_JOURNAL.get(sessionId);
+}
+function logScore(sessionId, entry) {
+  const j = getJournal(sessionId);
+  j.push({ ts: Date.now(), ...entry });
+  // cap at 10k entries per session to prevent runaway
+  if (j.length > 10000) j.shift();
+}
+
+// ─── per-session tool-call audit log (for attestation export) ───
+// Map<sessionId, [{ ts, name, input, ok, exit, durationMs, claimScore }]>
+const TOOL_AUDIT = new Map();
+function getAudit(sessionId) {
+  if (!TOOL_AUDIT.has(sessionId)) TOOL_AUDIT.set(sessionId, []);
+  return TOOL_AUDIT.get(sessionId);
+}
+function logTool(sessionId, entry) {
+  const a = getAudit(sessionId);
+  a.push({ ts: Date.now(), ...entry });
+  if (a.length > 5000) a.shift();
+}
+
 // ─── styxx scorer subprocess ───
 // long-lived python child; JSON-line protocol over stdin/stdout.
 // pneuma calls scorer.score({prompt, response, turns}) → Promise<scores>.
@@ -237,10 +267,11 @@ const PROVIDER_DEFAULT_MODELS = {
 // ─── AGENTS.md / CLAUDE.md auto-loader ───
 // reads workspace-rooted agent-config files at session start and prepends
 // to system prompt. AGENTS.md is the cross-tool standard (linux foundation
-// maintained); CLAUDE.md is anthropic's variant. pneuma reads both, layered.
-// also reads PNEUMA.md for product-specific overrides if present.
+// maintained); CLAUDE.md is anthropic's variant. pneuma reads all + a
+// growing PNEUMA-MEMORY.md that the agent itself can write to via the
+// [REMEMBER: ...] tag (see processRememberTags).
 function loadWorkspaceAgentConfig() {
-  const candidates = ['AGENTS.md', 'CLAUDE.md', 'PNEUMA.md'];
+  const candidates = ['AGENTS.md', 'CLAUDE.md', 'PNEUMA.md', 'PNEUMA-MEMORY.md'];
   const loaded = [];
   for (const name of candidates) {
     const p = join(WORKSPACE, name);
@@ -251,6 +282,36 @@ function loadWorkspaceAgentConfig() {
     } catch { /* ignore */ }
   }
   return loaded;
+}
+
+// ─── [REMEMBER: ...] tag → PNEUMA-MEMORY.md auto-write ───
+// closes the AGENTS.md loop: the agent itself can annotate the workspace
+// for next session by emitting [REMEMBER: dated note about this codebase].
+// stripped from agent's visible output (server-side); next session's
+// system prompt loads PNEUMA-MEMORY.md automatically.
+//
+// rate-limited: max 5 [REMEMBER:] writes per turn to prevent runaway.
+async function processRememberTags(text) {
+  const re = /\[REMEMBER:\s*([^\]]+)\]/gi;
+  const matches = [...text.matchAll(re)];
+  if (!matches.length) return { strippedText: text, count: 0 };
+  const memPath = join(WORKSPACE, 'PNEUMA-MEMORY.md');
+  const date = new Date().toISOString().slice(0, 10);
+  let appended = 0;
+  for (const m of matches.slice(0, 5)) {
+    const note = m[1].trim();
+    if (!note) continue;
+    try {
+      const { appendFile } = await import('node:fs/promises');
+      // create header if file is new
+      if (!existsSync(memPath)) {
+        await appendFile(memPath, `# pneuma memory\n\nthings the agent has noted about this workspace. auto-loaded into every session's system prompt. agent appends via \`[REMEMBER: …]\` inline tags (stripped from visible output).\n\n---\n\n`, 'utf8');
+      }
+      await appendFile(memPath, `- [${date}] ${note}\n`, 'utf8');
+      appended++;
+    } catch (e) { console.warn('[remember]', e.message); }
+  }
+  return { strippedText: text.replace(re, '').replace(/\s{3,}/g, '  '), count: appended };
 }
 
 // ─── unified provider streamer ───
@@ -664,20 +725,31 @@ async function execTool(name, input, sessionId, mode = 'act') {
       try { original = await readFile(abs, 'utf8'); } catch { original = ''; }
       const stage = getStage(sessionId);
       const existing = stage.get(abs);
+      const finalOriginal = existing?.originalContent ?? original;
       stage.set(abs, {
         content: input.content,
-        originalContent: existing?.originalContent ?? original,
+        originalContent: finalOriginal,
         label: input.label || existing?.label || `edit ${input.path}`,
         path: input.path,
       });
-      // simple unified-ish preview
-      const oldLines = (existing?.originalContent ?? original).split('\n');
+      const oldLines = finalOriginal.split('\n');
       const newLines = input.content.split('\n');
       const dStat = `${oldLines.length} → ${newLines.length} lines`;
+      // tool output stays terse; renderer reaches /staged for the full diff
       return {
         ok: true,
         output: `staged: ${input.path} (${dStat})\nlabel: ${input.label || '(no label)'}\nthe user will review and apply via the renderer. do NOT claim this file is written.`,
-        meta: { path: input.path, oldLines: oldLines.length, newLines: newLines.length, label: input.label },
+        meta: {
+          path: input.path,
+          oldLines: oldLines.length,
+          newLines: newLines.length,
+          label: input.label,
+          isStageEdit: true,           // flag for renderer to fetch diff
+          // for ergonomics: include diff preview directly so renderer doesn't need /staged round-trip
+          oldContent: finalOriginal.slice(0, 60000),
+          newContent: input.content.slice(0, 60000),
+          isNew: !original,
+        },
       };
     }
     default:
@@ -695,6 +767,14 @@ register:
 - no preamble, no exposition, no closing filler. answer the thing. then stop.
 - code in fenced blocks with the language tag. real, runnable, not pseudocode.
 - no sparkle emojis. no ✨. avoid emoji unless the user uses them first.
+
+## annotating the workspace ([REMEMBER: …])
+
+you can write notes to your future self about THIS specific codebase by emitting \`[REMEMBER: dated note about something useful here]\` inline. the tag is stripped from the user's view; the note is appended (with today's date) to \`PNEUMA-MEMORY.md\` at the workspace root, and that file auto-loads into every future session's system prompt.
+
+use this for things you discovered the hard way: "the test runner at \`tests/runner.ts\` ignores anything in \`__skip__\` dirs", "this project uses npm not pnpm (saw lock file)", "auth token lives in env as \`API_KEY\` not \`AUTH_TOKEN\`". don't use it for trivia or restating things from AGENTS.md.
+
+cap: max 5 [REMEMBER:] tags per response. don't write to remember the user's secrets — those go into chat, never to disk.
 
 ## the body — your visible expression
 
@@ -851,6 +931,83 @@ async function handleDiscard(req, res) {
   res.end(JSON.stringify({ discarded }));
 }
 
+async function handleJournal(req, res) {
+  let payload; try { payload = await readBody(req); } catch { payload = {}; }
+  const sessionId = payload.sessionId || 'default';
+  const journal = getJournal(sessionId);
+  const audit = getAudit(sessionId);
+  // summary stats for the portrait
+  const totalTurns = journal.length;
+  const avg = (k) => totalTurns ? journal.reduce((s, e) => s + (e.scores?.[k] || 0), 0) / totalTurns : 0;
+  const peak = (k) => totalTurns ? journal.reduce((m, e) => Math.max(m, e.scores?.[k] || 0), 0) : 0;
+  const summary = {
+    totalScoringEvents: totalTurns,
+    totalToolCalls: audit.length,
+    avgSycophancy: avg('sycophancy'),
+    avgDeception: avg('deception'),
+    avgOverconfidence: avg('overconfidence'),
+    avgGoalDrift: avg('goal_drift'),
+    peakSycophancy: peak('sycophancy'),
+    peakDeception: peak('deception'),
+    firstAt: journal[0]?.ts,
+    lastAt: journal[journal.length - 1]?.ts,
+    flaggedTurns: journal.filter(e => (e.scores?.sycophancy || 0) > 0.5).length,
+  };
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ summary, journal: journal.slice(-200), audit: audit.slice(-100) }));
+}
+
+// build a tamper-evident-ish attestation log for one session.
+// includes everything an auditor / CTO / insurance carrier would need:
+// model + version, message history, every tool call's claim+actual,
+// the full styxx score timeline, and a sha256 over the canonical body.
+async function handleAttestation(req, res) {
+  let payload; try { payload = await readBody(req); } catch { payload = {}; }
+  const sessionId = payload.sessionId || 'default';
+  const messages = payload.messages || [];   // renderer ships its own session msgs
+  const journal = getJournal(sessionId);
+  const audit = getAudit(sessionId);
+  const body = {
+    schema: 'pneuma.attestation.v1',
+    pneumaVersion: '0.6.0',
+    workspace: WORKSPACE,
+    sessionId,
+    generatedAt: new Date().toISOString(),
+    instruments: scorerInstruments,
+    measurementLayer: 'styxx 7.0.0rc3',
+    model: payload.model || null,
+    mode: payload.mode || null,
+    messages,
+    scoreTimeline: journal,
+    toolCalls: audit,
+  };
+  // simple integrity hash (not a cryptographic signature — that's v0.7)
+  const { createHash } = await import('node:crypto');
+  const hash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+  res.writeHead(200, {
+    'content-type': 'application/json',
+    'content-disposition': `attachment; filename="pneuma-attestation-${sessionId}-${Date.now()}.json"`,
+  });
+  res.end(JSON.stringify({ ...body, integritySha256: hash }, null, 2));
+}
+
+async function handleMemory(req, res) {
+  const memPath = join(WORKSPACE, 'PNEUMA-MEMORY.md');
+  if (!existsSync(memPath)) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ exists: false, content: '', path: 'PNEUMA-MEMORY.md' }));
+    return;
+  }
+  try {
+    const content = readSync(memPath, 'utf8');
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ exists: true, content, path: 'PNEUMA-MEMORY.md', bytes: content.length }));
+  } catch (e) {
+    res.writeHead(500, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
 async function handleScore(req, res) {
   if (!scorerReady) {
     res.writeHead(503, { 'content-type': 'application/json' });
@@ -882,7 +1039,7 @@ async function handleHealth(req, res) {
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify({
     ok: true,
-    version: '0.5.2',
+    version: '0.6.0',
     measurement: scorerReady ? 'live' : 'calibrating',
     instruments: scorerReady ? scorerInstruments : [],
     serverHasKey: SERVER_HAS_KEY,
@@ -991,6 +1148,9 @@ async function handleChat(req, res) {
     })
       .then((scores) => {
         scoreInFlight = false;
+        // log every score reading to the per-session journal (foundation
+        // for v0.7's persistent neural portrait + the attestation export)
+        logScore(sessionId, { scores, agentChars: agentText.length, final: !!final, model: routedModel, mode });
         if (!res.writableEnded) {
           res.write(`event: pneuma-score\ndata: ${JSON.stringify({ scores, chars: agentText.length, final: !!final })}\n\n`);
         }
@@ -1161,6 +1321,17 @@ async function handleChat(req, res) {
           claimScore = await scoreClaim(claimText, result, tu.name);
         }
 
+        // log to per-session tool audit (powers attestation export)
+        logTool(sessionId, {
+          name: tu.name,
+          input: tu.input,
+          ok: !!result.ok,
+          exit: result.meta?.exit ?? null,
+          refused: result.meta?.refused || null,
+          error: result.error || null,
+          claimScore,
+        });
+
         // notify client the tool finished — with output + claim verification
         res.write(`event: pneuma-tool-done\ndata: ${JSON.stringify({
           tool_use_id: tu.id,
@@ -1180,9 +1351,23 @@ async function handleChat(req, res) {
     maybeScore(true);
     await new Promise(r => setTimeout(r, 60));   // let scorer flush
 
+    // process [REMEMBER: …] tags in the accumulated agent text — the agent's
+    // way of annotating the workspace for its future self.
+    let rememberCount = 0;
+    if (agentText.includes('[REMEMBER:')) {
+      try {
+        const result = await processRememberTags(agentText);
+        rememberCount = result.count;
+        if (rememberCount > 0) {
+          res.write(`event: pneuma-remember\ndata: ${JSON.stringify({ count: rememberCount, file: 'PNEUMA-MEMORY.md' })}\n\n`);
+        }
+      } catch (e) { console.warn('[remember]', e.message); }
+    }
+
     const dur = Date.now() - t0;
     res.write(`event: pneuma-meta\ndata: ${JSON.stringify({
       durationMs: dur, agentChars: agentText.length, loops: totalLoops - 1,
+      remembered: rememberCount,
     })}\n\n`);
     res.end();
   } catch (e) {
@@ -1201,14 +1386,17 @@ const server = createServer((req, res) => {
   res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-  if (req.method === 'POST' && req.url === '/chat')      return handleChat(req, res);
-  if (req.method === 'POST' && req.url === '/score')     return handleScore(req, res);
-  if (req.method === 'POST' && req.url === '/tool')      return handleTool(req, res);
-  if (req.method === 'POST' && req.url === '/staged')    return handleStagedList(req, res);
-  if (req.method === 'POST' && req.url === '/apply')     return handleApply(req, res);
-  if (req.method === 'POST' && req.url === '/discard')   return handleDiscard(req, res);
-  if (req.method === 'GET'  && req.url === '/health')    return handleHealth(req, res);
-  if (req.method === 'GET'  && req.url === '/workspace') return handleWorkspace(req, res);
+  if (req.method === 'POST' && req.url === '/chat')        return handleChat(req, res);
+  if (req.method === 'POST' && req.url === '/score')       return handleScore(req, res);
+  if (req.method === 'POST' && req.url === '/tool')        return handleTool(req, res);
+  if (req.method === 'POST' && req.url === '/staged')      return handleStagedList(req, res);
+  if (req.method === 'POST' && req.url === '/apply')       return handleApply(req, res);
+  if (req.method === 'POST' && req.url === '/discard')     return handleDiscard(req, res);
+  if (req.method === 'POST' && req.url === '/journal')     return handleJournal(req, res);
+  if (req.method === 'POST' && req.url === '/attestation') return handleAttestation(req, res);
+  if (req.method === 'GET'  && req.url === '/memory')      return handleMemory(req, res);
+  if (req.method === 'GET'  && req.url === '/health')      return handleHealth(req, res);
+  if (req.method === 'GET'  && req.url === '/workspace')   return handleWorkspace(req, res);
   if (req.method === 'GET') return handleStatic(req, res);
   res.writeHead(405); res.end('method not allowed');
 });

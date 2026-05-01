@@ -1,6 +1,6 @@
 {
   "name": "pneuma",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "a measured-AI desktop chat — the agent's body is its breath. its breath cannot lie.",
   "type": "module",
   "main": "server/server.js",

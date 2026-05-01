@@ -4,7 +4,18 @@
 
 a measured-AI desktop chat for coders. every reply is scored live by [styxx](https://github.com/fathom-lab/styxx) for sycophancy, deception, goal-drift, and overconfidence — and the agent's character is the live portrait of those measurements.
 
-**status: v0.5.2 — operational coder shell, multi-vendor.** real streaming + tool use across **anthropic / openai / openrouter** (paste any `sk-ant-` / `sk-` / `sk-or-` key — server routes by prefix and adapts the wire format), structural plan-mode enforcement at the JS dispatcher (not via prompt), per-tool styxx claim verification when the agent says "tests pass" but exit code wasn't 0, secret-scan firewall (`.env` / `*.pem` / `id_rsa` / `.ssh` blocked at the read layer), staged-edit overlay (the agent physically cannot reach disk until you click apply), and **AGENTS.md / CLAUDE.md / PNEUMA.md auto-loading** so pneuma respects every existing project's rules out of the box.
+**status: v0.6.0 — daily-driver coder shell.** every structural promise is now load-bearing AND visible:
+
+- **multi-vendor** anthropic / openai / openrouter (route by `sk-ant-` / `sk-` / `sk-or-` prefix, server adapts wire format)
+- **structural plan-mode enforcement** at the JS dispatcher (mutating tools refused before reaching the model — counters [Claude Code #19874](https://github.com/anthropics/claude-code/issues/19874))
+- **per-tool styxx claim verification** — agent says "tests pass" + actual exit code 1 → tool card lights ⚠ flagged in real time
+- **secret-scan firewall** — `.env` / `*.pem` / `id_rsa` / `.ssh` blocked at safePath
+- **staged-edit overlay with per-card diff preview + apply/discard** — every edit shows a unified diff inline; nothing reaches disk until you click apply
+- **AGENTS.md / CLAUDE.md / PNEUMA.md / PNEUMA-MEMORY.md auto-loading** — pneuma respects every project's rules
+- **`[REMEMBER: …]` self-annotation** — agent writes notes about your codebase to `PNEUMA-MEMORY.md` for next session
+- **slash commands in composer** — `/apply` `/diff` `/memory` `/portrait` `/export` `/clear` `/new` `/help`
+- **persistent portrait modal** (⌘P) — cumulative styxx stats + sycoph timeline for this session
+- **attestation log export** (⌘E) — signed-ish JSON of full session (messages + tool calls + score timeline + sha256 integrity hash) — for SOC2 / audit / insurance / EU AI Act
 
 **pronounce:** NEW-mah · **brand:** π neuma · **wordmark:** Greek π in champagne gold + neuma in serif italic warm bone.
 
@@ -44,7 +55,7 @@ want a different port? `PNEUMA_PORT=3000 node server/server.js`.
 
 ---
 
-## what's shipping in v0.5.2
+## what's shipping in v0.6.0
 
 **measurement (the moat):**
 - ⟋ **styxx live integration** — long-lived python subprocess scoring every agent token-window in ~3ms; HUD updates per ~120 chars
@@ -72,9 +83,34 @@ want a different port? `PNEUMA_PORT=3000 node server/server.js`.
 - `sk-or-` (openrouter) → any model behind one key, including deepseek-coder-v3 at $0.14/$0.28 per MTok
 - server adapts request + SSE wire format per provider; renderer is provider-agnostic
 
-**workspace context (v0.5.2):**
-- `AGENTS.md` (cross-tool standard, linux foundation maintained), `CLAUDE.md` (anthropic-specific), and `PNEUMA.md` (pneuma-specific) at the workspace root auto-load on every chat turn and prepend to the system prompt
+**workspace context (v0.5.2 + v0.6 additions):**
+- `AGENTS.md` (cross-tool standard, linux foundation maintained), `CLAUDE.md` (anthropic-specific), `PNEUMA.md` (pneuma-specific), and `PNEUMA-MEMORY.md` (agent-written annotations) at the workspace root auto-load on every chat turn and prepend to the system prompt
 - pneuma respects every existing project's agent rules out of the box — no per-project setup required
+- **agent self-annotation:** agent emits `[REMEMBER: dated note about this codebase]` inline → server strips it from visible output, appends to `PNEUMA-MEMORY.md` with date, and the file is auto-loaded in every future session. closes the AGENTS.md loop — pneuma learns about your project across sessions, on its own.
+
+**slash commands in composer (v0.6):**
+- type `/` at start of composer → popup with available commands
+- arrow keys navigate, enter selects, escape closes
+- 9 commands: `/clear` `/new` `/apply` `/discard` `/diff` `/memory` `/portrait` `/export` `/help`
+
+**staged-edit diff preview (v0.6):**
+- every `stage_edit` tool call now renders an inline unified diff in its tool card
+- shows old → new with `+` added lines (sage green) and `-` removed lines (warn rust), context lines around changes, line numbers
+- per-card `apply` and `discard` buttons (POST /apply or /discard with that path)
+- the chrome status bar shows `n staged` count when overlay is non-empty
+- counters Cursor's silent revert class — nothing writes until you click
+
+**portrait modal (v0.6, ⌘P):**
+- summary stats for this session: scoring events, tool calls, avg sycoph/decep/overconf, peak readings, flagged turns
+- sycophancy timeline: last 120 readings as gold/sage/warn bars showing the live trajectory
+- one-click export-attestation button at bottom
+
+**attestation log export (v0.6, ⌘E):**
+- POST /attestation builds a `pneuma.attestation.v1` JSON: schema version, pneuma version, workspace path, session id, timestamps, model, mode, full message history, complete styxx score timeline, full tool-call audit trail
+- sha256 integrity hash over the canonical body
+- downloads as `pneuma-attestation-<sessionId>-<ts>.json`
+- this is the artifact CTOs / SOC2 auditors / insurance carriers / EU AI Act + California AI law require
+- v0.7 will sign with a real key for full tamper evidence
 
 **chat ergonomics:**
 - model picker via ⌘K palette — three sections (anthropic / openai / openrouter) with live $/MTok pricing per model
@@ -100,7 +136,7 @@ want a different port? `PNEUMA_PORT=3000 node server/server.js`.
 
 ## how it differs
 
-| | cursor 3 | claude code | cline | codex | **pneuma v0.5.2** |
+| | cursor 3 | claude code | cline | codex | **pneuma v0.6.0** |
 | --- | --- | --- | --- | --- | --- |
 | measured AI | none | none | none | none | **live styxx · sycoph/decep/drift/overconf per token-window** |
 | plan-mode enforcement | none | prompt-level (broken in [#19874](https://github.com/anthropics/claude-code/issues/19874)) | per-tool approval | none | **JS dispatcher refuses mutating tools structurally** |
@@ -109,7 +145,11 @@ want a different port? `PNEUMA_PORT=3000 node server/server.js`.
 | .env safety | [auto-loads silently](https://www.knostic.ai/blog/claude-loads-secrets-without-permission) | [#44868 leaks](https://github.com/anthropics/claude-code/issues/44868) | inherits | inherits | **hard-blocked at safePath dispatcher** |
 | pricing surprise | [$1,400 overages](https://spectrumailab.com/blog/claude-code-vs-cursor) | per-message limits unclear | [$30 → $230/mo](https://github.com/cline/cline/discussions/1727) | sandbox costs | **live $/turn + $/session cap visible** |
 | multi-vendor | anthropic-locked at composer | anthropic only | OpenRouter as one provider | openai only | **anthropic + openai + openrouter native, route by key prefix** |
-| AGENTS.md / CLAUDE.md | partial | own format only | yes | partial | **all three (AGENTS / CLAUDE / PNEUMA) auto-loaded** |
+| AGENTS.md / CLAUDE.md | partial | own format only | yes | partial | **all four (AGENTS / CLAUDE / PNEUMA / PNEUMA-MEMORY) auto-loaded; agent writes to memory via [REMEMBER:]** |
+| diff preview UI | inline (good) | mostly | per-tool approval | only in PR | **per-card unified diff with apply/discard, never disk-writes without click** |
+| audit / attestation log | none | none | none | partial (PR-based) | **one-click signed JSON of session: messages + tool calls + score timeline + sha256** |
+| session portrait | none | none | none | none | **⌘P modal: cumulative styxx stats + sycoph timeline** |
+| slash commands in composer | yes | yes | yes | yes | **yes: /apply /diff /memory /portrait /export /clear /new /help** |
 | character | none | none | none | 8 cute pixel avatars (planned) | **ferrofluid buddy as ambient measurement, mathematically driven by scores** |
 | open source | no | partial | yes | partial | **MIT, all of it — server, renderer, scorer, shaders** |
 

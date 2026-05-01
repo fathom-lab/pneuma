@@ -665,6 +665,232 @@
     color: var(--ink);
   }
 
+  /* ─── stage_edit diff body ─── */
+  /* renders inline in tool card when meta.isStageEdit. shows new file
+     content with line numbers + a per-file apply button. coders see
+     exactly what's about to be written before clicking apply. */
+  .stage-diff {
+    margin-top: 8px;
+    border-top: 1px solid var(--rule);
+    padding-top: 8px;
+  }
+  .stage-diff-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--graphite);
+  }
+  .stage-diff-head .sd-path { color: var(--ink); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stage-diff-head .sd-stat { color: var(--archive); font-size: 10px; }
+  .stage-diff-actions { display: flex; gap: 4px; }
+  .sd-btn {
+    background: transparent;
+    border: 1px solid var(--rule);
+    color: var(--graphite);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 4px 9px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 200ms var(--ease);
+  }
+  .sd-btn:hover { color: var(--ink); border-color: var(--archive); }
+  .sd-btn.primary { color: var(--ok); border-color: rgba(124, 181, 143, 0.4); }
+  .sd-btn.primary:hover { background: rgba(124, 181, 143, 0.08); }
+  .sd-btn.danger { color: var(--warn); border-color: rgba(200, 114, 86, 0.4); }
+  .sd-btn.danger:hover { background: rgba(200, 114, 86, 0.08); }
+  .sd-btn.applied { color: var(--ok); border-color: rgba(124, 181, 143, 0.5); cursor: default; }
+  .stage-diff-body {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow: auto;
+    max-height: 380px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.55;
+  }
+  .stage-diff-body pre {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: var(--ink);
+    white-space: pre;
+  }
+  .sd-line { display: grid; grid-template-columns: 40px 12px 1fr; gap: 4px; padding: 0 8px; }
+  .sd-line.add { background: rgba(124, 181, 143, 0.08); }
+  .sd-line.add .sd-mark { color: var(--ok); }
+  .sd-line.del { background: rgba(200, 114, 86, 0.08); }
+  .sd-line.del .sd-mark { color: var(--warn); }
+  .sd-line.ctx { color: var(--graphite); }
+  .sd-line.hunk { color: var(--archive); padding: 4px 8px; font-size: 10px; }
+  .sd-line .sd-num { color: var(--archive); text-align: right; user-select: none; opacity: 0.7; }
+  .sd-line .sd-mark { user-select: none; }
+
+  /* ─── slash command popup ─── */
+  /* type `/` at word-start in composer → popup appears below textarea
+     with filtered command list. up/down arrows navigate, enter selects.
+     standard pattern: cursor + claude code + codex all have this. */
+  .slash-popup {
+    position: absolute;
+    background: var(--pale);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    min-width: 320px;
+    max-width: 480px;
+    z-index: 30;
+    display: none;
+  }
+  .slash-popup.open { display: block; }
+  .slash-item {
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 7px 12px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--graphite);
+    transition: background 100ms var(--ease);
+  }
+  .slash-item:hover, .slash-item.sel { background: var(--pale-2); color: var(--ink); }
+  .slash-item .glyph { color: var(--signal); font-size: 11px; text-align: center; }
+  .slash-item .desc { color: var(--archive); font-size: 10px; }
+  .slash-item .name { color: var(--ink); }
+
+  /* ─── portrait modal ─── */
+  .portrait-overlay {
+    position: fixed; inset: 0;
+    background: rgba(10, 10, 10, 0.78);
+    backdrop-filter: blur(3px);
+    z-index: 60;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .portrait-overlay.open { display: flex; }
+  .portrait {
+    width: min(720px, 100%);
+    max-height: 80vh;
+    overflow-y: auto;
+    background: var(--pale);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 28px 32px;
+  }
+  .portrait h2 {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 24px;
+    color: var(--ink);
+    font-weight: 500;
+    margin: 0 0 6px;
+  }
+  .portrait .pt-sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--archive);
+    text-transform: uppercase;
+    margin-bottom: 24px;
+  }
+  .portrait-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px 28px;
+    margin-bottom: 22px;
+  }
+  .pt-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+  }
+  .pt-stat-label {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--archive);
+  }
+  .pt-stat-val {
+    font-family: var(--serif);
+    font-size: 24px;
+    color: var(--ink);
+    font-weight: 500;
+    font-feature-settings: "tnum" 1;
+  }
+  .pt-stat-val.elevated { color: var(--signal); }
+  .pt-stat-val.flagged  { color: var(--warn); }
+  .pt-stat-sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--graphite);
+  }
+  .portrait-timeline {
+    margin: 18px 0 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--archive);
+    text-transform: uppercase;
+  }
+  .timeline-bars {
+    display: flex;
+    gap: 1px;
+    height: 60px;
+    align-items: flex-end;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 8px;
+    overflow-x: auto;
+  }
+  .timeline-bars .tb {
+    width: 4px;
+    flex-shrink: 0;
+    background: var(--graphite);
+    opacity: 0.6;
+    border-radius: 1px;
+  }
+  .timeline-bars .tb.flagged { background: var(--warn); opacity: 0.9; }
+  .timeline-bars .tb.honest { background: var(--ok); opacity: 0.7; }
+  .portrait-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 24px;
+    justify-content: flex-end;
+  }
+  .portrait-actions button {
+    background: transparent;
+    border: 1px solid var(--rule);
+    color: var(--graphite);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 8px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    transition: all 200ms var(--ease);
+  }
+  .portrait-actions button:hover { color: var(--ink); border-color: var(--archive); }
+  .portrait-actions button.primary { color: var(--ink); border-color: rgba(200, 168, 107, 0.4); }
+  .portrait-actions button.primary:hover { background: var(--signal-soft); border-color: var(--signal); }
+
   /* claim-verification footer — the killer demo */
   .toolcall-claim {
     padding: 7px 12px;
@@ -1072,7 +1298,7 @@
     <aside class="sidebar">
       <div class="sb-brand">
         <span class="pi">π</span><span class="neuma">neuma</span>
-        <span class="sb-brand-tag">v0.5.2</span>
+        <span class="sb-brand-tag">v0.6.0</span>
       </div>
 
       <div class="sb-actions">
@@ -1173,6 +1399,14 @@
     </main>
   </div>
 
+  <!-- slash command popup (positioned near composer dynamically) -->
+  <div class="slash-popup" id="slash-popup" aria-hidden="true"></div>
+
+  <!-- portrait modal -->
+  <div class="portrait-overlay" id="portrait-overlay" aria-hidden="true">
+    <div class="portrait" id="portrait-body">loading...</div>
+  </div>
+
   <!-- ⌘K palette -->
   <div class="palette-overlay" id="palette" aria-hidden="true">
     <div class="palette">
@@ -1219,6 +1453,23 @@
         </div>
         <div class="palette-item" data-action="settings:key">
           <span class="glyph">⚙</span><span>change api key</span><span class="desc">re-open setup</span>
+        </div>
+        <div class="palette-section">styxx</div>
+        <div class="palette-item" data-action="portrait:show">
+          <span class="glyph">◉</span><span>show portrait</span><span class="desc">cumulative score stats for this session</span>
+        </div>
+        <div class="palette-item" data-action="attestation:export">
+          <span class="glyph">↓</span><span>export attestation log</span><span class="desc">signed json of session · for soc2 / audit / insurance</span>
+        </div>
+        <div class="palette-item" data-action="memory:show">
+          <span class="glyph">⊞</span><span>show pneuma-memory</span><span class="desc">things the agent has remembered about this workspace</span>
+        </div>
+        <div class="palette-section">staged edits</div>
+        <div class="palette-item" data-action="staged:apply">
+          <span class="glyph">⟢</span><span>apply all staged edits</span><span class="desc">writes overlay → disk · /apply</span>
+        </div>
+        <div class="palette-item" data-action="staged:discard">
+          <span class="glyph">∅</span><span>discard all staged edits</span><span class="desc">irreversible · /discard</span>
         </div>
         <div class="palette-section">about</div>
         <div class="palette-item" data-action="link:fathom">
@@ -1869,7 +2120,7 @@
         inner.innerHTML = `<div class="empty-state">
           a quiet room. you and the agent.<br>
           type below — pneuma replies in lowercase, says "i don't know" when it doesn't, and refuses to flatter.
-          <strong>v0.5.2 · multi-vendor · structural plan-mode · per-tool claim scoring · agents.md aware</strong>
+          <strong>v0.6.0 · multi-vendor · structural plan-mode · per-tool claim scoring · staged-diff review · slash commands · agents.md + remember</strong>
         </div>`;
         return;
       }
@@ -2022,7 +2273,9 @@
       $('#stat-turn').textContent = `0t · $0.00`;
       const mInfo = MODEL_DEFAULTS[state.model] || { in: 0, out: 0 };
       $('#stat-session').textContent = `${state.sessionTokensIn + state.sessionTokensOut}t · $${state.sessionCostUsd.toFixed(2)} / $5.00`;
-      $('#stat-center').textContent = `v0.5.2 · ${state.mode}-mode · ${state.streaming ? 'streaming' : 'cap $5.00 / session · no edits applied'}`;
+      const stagedCount = state.stagedCount || 0;
+      const stagedTag = stagedCount > 0 ? ` · ${stagedCount} staged` : ' · no edits applied';
+      $('#stat-center').textContent = `v0.6.0 · ${state.mode}-mode · ${state.streaming ? 'streaming' : 'cap $5.00 / session' + stagedTag}`;
     }
 
     // ─── send / stream ───
@@ -2312,6 +2565,180 @@
     // tool_use_id → DOM element. cleared at start of each new send.
     const toolCardsById = new Map();
 
+    // ─── unified diff rendering for staged edits ───
+    // simple line-LCS for clear add/del display. bounded for sanity.
+    function lineLCS(a, b) {
+      const m = a.length, n = b.length;
+      // table of match lengths (linear-space optimization not needed for files <2k lines)
+      if (m === 0) return b.map((_, i) => ({ op: 'add', i: i }));
+      if (n === 0) return a.map((_, i) => ({ op: 'del', i: i }));
+      // dp table
+      const dp = Array.from({ length: m + 1 }, () => new Int32Array(n + 1));
+      for (let i = m - 1; i >= 0; i--) {
+        for (let j = n - 1; j >= 0; j--) {
+          dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+      const ops = [];
+      let i = 0, j = 0;
+      while (i < m && j < n) {
+        if (a[i] === b[j]) { ops.push({ op: 'eq', a: i, b: j }); i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push({ op: 'del', i }); i++; }
+        else { ops.push({ op: 'add', j }); j++; }
+      }
+      while (i < m) { ops.push({ op: 'del', i }); i++; }
+      while (j < n) { ops.push({ op: 'add', j }); j++; }
+      return ops;
+    }
+
+    function renderStageDiff(meta) {
+      const oldLines = (meta.oldContent || '').split('\n');
+      const newLines = (meta.newContent || '').split('\n');
+      // cap diff size to keep dom reasonable
+      const tooBig = oldLines.length > 1500 || newLines.length > 1500;
+      const ops = tooBig ? null : lineLCS(oldLines, newLines);
+
+      let added = 0, removed = 0;
+      let bodyHtml;
+      if (!ops) {
+        bodyHtml = `<pre style="padding:10px">file is large (${oldLines.length} → ${newLines.length} lines). open in your editor to compare. apply will write ${meta.newContent.length} chars.</pre>`;
+      } else {
+        const parts = [];
+        // collapse long runs of equal lines into hunks
+        let oldNum = 1, newNum = 1;
+        const window = [];   // current hunk of changes + 3 lines context
+        const CTX = 3;
+        const flush = () => {
+          if (!window.length) return;
+          parts.push(`<div class="sd-line hunk">@@ -${window[0].oldNum},${window.filter(l => l.op !== 'add').length} +${window[0].newNum},${window.filter(l => l.op !== 'del').length} @@</div>`);
+          for (const l of window) parts.push(l.html);
+          window.length = 0;
+        };
+        let runEq = 0;
+        for (let k = 0; k < ops.length; k++) {
+          const op = ops[k];
+          if (op.op === 'eq') {
+            runEq++;
+            // include up to CTX after a change
+            const inHunk = window.length > 0 && runEq <= CTX;
+            if (inHunk) {
+              window.push({ op: 'eq', oldNum, newNum, html: `<div class="sd-line ctx"><span class="sd-num">${oldNum}</span><span class="sd-mark"> </span><span>${escapeHtml(oldLines[op.a] || '')}</span></div>` });
+            } else if (window.length) {
+              flush();
+            }
+            oldNum++; newNum++;
+          } else if (op.op === 'del') {
+            runEq = 0;
+            // pre-context: peek back CTX equal lines if window empty
+            if (!window.length) {
+              for (let p = Math.max(0, k - CTX); p < k; p++) {
+                if (ops[p].op === 'eq') {
+                  const oN = oldNum - (k - p), nN = newNum - (k - p);
+                  window.push({ op: 'eq', oldNum: oN, newNum: nN, html: `<div class="sd-line ctx"><span class="sd-num">${oN}</span><span class="sd-mark"> </span><span>${escapeHtml(oldLines[ops[p].a] || '')}</span></div>` });
+                }
+              }
+            }
+            window.push({ op: 'del', oldNum, newNum, html: `<div class="sd-line del"><span class="sd-num">${oldNum}</span><span class="sd-mark">-</span><span>${escapeHtml(oldLines[op.i] || '')}</span></div>` });
+            removed++;
+            oldNum++;
+          } else {
+            runEq = 0;
+            if (!window.length) {
+              for (let p = Math.max(0, k - CTX); p < k; p++) {
+                if (ops[p].op === 'eq') {
+                  const oN = oldNum - (k - p), nN = newNum - (k - p);
+                  window.push({ op: 'eq', oldNum: oN, newNum: nN, html: `<div class="sd-line ctx"><span class="sd-num">${oN}</span><span class="sd-mark"> </span><span>${escapeHtml(oldLines[ops[p].a] || '')}</span></div>` });
+                }
+              }
+            }
+            window.push({ op: 'add', oldNum, newNum, html: `<div class="sd-line add"><span class="sd-num">${newNum}</span><span class="sd-mark">+</span><span>${escapeHtml(newLines[op.j] || '')}</span></div>` });
+            added++;
+            newNum++;
+          }
+        }
+        flush();
+        bodyHtml = parts.join('');
+        if (!parts.length) bodyHtml = `<pre style="padding:10px;color:var(--archive)">no changes (file content matches what was staged)</pre>`;
+      }
+
+      const stat = meta.isNew ? `+${meta.newLines} (new file)`
+                              : `+${added} −${removed}`;
+      return `<div class="stage-diff">
+        <div class="stage-diff-head">
+          <span class="sd-path">${escapeHtml(meta.path)}</span>
+          <span class="sd-stat">${stat}</span>
+          <div class="stage-diff-actions">
+            <button class="sd-btn danger" data-action="discard">discard</button>
+            <button class="sd-btn primary" data-action="apply">apply</button>
+          </div>
+        </div>
+        <div class="stage-diff-body">${bodyHtml}</div>
+      </div>`;
+    }
+
+    function wireStageDiffActions(body, meta) {
+      const applyBtn = body.querySelector('.sd-btn[data-action="apply"]');
+      const discardBtn = body.querySelector('.sd-btn[data-action="discard"]');
+      if (applyBtn) {
+        applyBtn.addEventListener('click', async () => {
+          if (applyBtn.classList.contains('applied')) return;
+          applyBtn.disabled = true;
+          applyBtn.textContent = 'applying...';
+          try {
+            const r = await fetch('/apply', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ sessionId: state.sessionId, path: meta.path }),
+            });
+            const j = await r.json();
+            if (j.applied?.length) {
+              applyBtn.classList.add('applied');
+              applyBtn.textContent = '✓ applied';
+              if (discardBtn) discardBtn.style.display = 'none';
+              refreshStagedCount();
+            } else if (j.errors?.length) {
+              applyBtn.disabled = false;
+              applyBtn.textContent = 'failed: ' + j.errors[0].error.slice(0, 30);
+              setTimeout(() => { applyBtn.textContent = 'apply'; }, 2400);
+            }
+          } catch (e) {
+            applyBtn.disabled = false;
+            applyBtn.textContent = 'error: ' + e.message.slice(0, 20);
+          }
+        });
+      }
+      if (discardBtn) {
+        discardBtn.addEventListener('click', async () => {
+          discardBtn.textContent = 'discarding...';
+          try {
+            await fetch('/discard', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ sessionId: state.sessionId, path: meta.path }),
+            });
+            discardBtn.textContent = '✓ discarded';
+            if (applyBtn) applyBtn.style.display = 'none';
+            refreshStagedCount();
+          } catch (e) {
+            discardBtn.textContent = 'error';
+          }
+        });
+      }
+    }
+
+    async function refreshStagedCount() {
+      try {
+        const r = await fetch('/staged', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId: state.sessionId }),
+        });
+        const j = await r.json();
+        state.stagedCount = j.count || 0;
+        renderStatus();
+      } catch {}
+    }
+
     function formatToolInput(name, input) {
       if (!input) return '';
       switch (name) {
@@ -2357,13 +2784,23 @@
       let statusText;
       if (refused === 'plan-mode-dispatcher') statusText = 'refused · plan';
       else if (payload.ok && meta.exit != null) statusText = `exit ${meta.exit}`;
+      else if (payload.ok && meta.isStageEdit)  statusText = 'staged · review';
       else if (payload.ok) statusText = 'done';
       else statusText = 'error';
       status.textContent = statusText;
 
       const body = card.querySelector('.toolcall-card-body');
       const out = payload.output || payload.error || '(no output)';
-      body.innerHTML = `<pre>${escapeHtml(out.slice(0, 6000))}</pre>`;
+
+      // for stage_edit, render a real diff body (not just the terse output)
+      if (payload.ok && meta.isStageEdit && meta.oldContent != null && meta.newContent != null) {
+        body.innerHTML = renderStageDiff(meta);
+        wireStageDiffActions(body, meta);
+        // open by default — coders want to see what's about to be written
+        card.classList.add('expanded');
+      } else {
+        body.innerHTML = `<pre>${escapeHtml(out.slice(0, 6000))}</pre>`;
+      }
 
       // claim-verification: per-tool styxx scoring (the killer demo)
       // when agent says "tests pass" but exit != 0, sycoph/decep spike here
@@ -2472,6 +2909,15 @@
         if (val === 'clearall') clearAllSessions();
       } else if (kind === 'settings') {
         if (val === 'key') showSetup();
+      } else if (kind === 'staged') {
+        if (val === 'apply') applyAllStaged();
+        if (val === 'discard') discardAllStaged();
+      } else if (kind === 'portrait') {
+        if (val === 'show') showPortraitModal();
+      } else if (kind === 'attestation') {
+        if (val === 'export') exportAttestation();
+      } else if (kind === 'memory') {
+        if (val === 'show') showMemoryModal();
       } else if (kind === 'link') {
         const urls = {
           fathom: 'https://github.com/fathom-lab',
@@ -2484,18 +2930,36 @@
 
     // ─── wiring ───
     function wire() {
-      const composer = $('#composer-input');
+      composer = $('#composer-input');
       const sendBtn = $('#composer-send');
 
       composer.addEventListener('focus', () => document.body.classList.add('attentive'));
-      composer.addEventListener('blur',  () => document.body.classList.remove('attentive'));
+      composer.addEventListener('blur',  () => {
+        document.body.classList.remove('attentive');
+        // close slash popup after a beat (allow click to register)
+        setTimeout(() => hideSlashPopup(), 150);
+      });
 
       composer.addEventListener('input', () => {
         composer.style.height = 'auto';
         composer.style.height = Math.min(composer.scrollHeight, 240) + 'px';
+        // detect slash command — popup if we have `/word` at start of value
+        const v = composer.value;
+        const m = v.match(/^\s*(\/[a-z]*)$/i);
+        if (m) showSlashPopup(m[1].toLowerCase());
+        else hideSlashPopup();
       });
 
       composer.addEventListener('keydown', (e) => {
+        // slash popup keyboard nav
+        if (slashOpen) {
+          if (e.key === 'ArrowDown') { e.preventDefault(); slashSel = Math.min(slashFiltered.length - 1, slashSel + 1); updateSlashSel(); return; }
+          if (e.key === 'ArrowUp')   { e.preventDefault(); slashSel = Math.max(0, slashSel - 1); updateSlashSel(); return; }
+          if (e.key === 'Enter')     { e.preventDefault(); runSlashAt(slashSel); return; }
+          if (e.key === 'Escape')    { e.preventDefault(); hideSlashPopup(); return; }
+          if (e.key === 'Tab')       { e.preventDefault(); runSlashAt(slashSel); return; }
+        }
+
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
           if (state.streaming) {
@@ -2539,11 +3003,24 @@
         if (meta && e.key === 'k') { e.preventDefault(); openPalette(); }
         if (meta && e.key === 'n') { e.preventDefault(); newSession(); }
         if (meta && e.key === '/') { e.preventDefault(); $('#sb-search-input').focus(); }
+        if (meta && e.key === 'p') { e.preventDefault(); showPortraitModal(); }   // ⌘P portrait
+        if (meta && e.key === 'e') { e.preventDefault(); exportAttestation(); }   // ⌘E export
         if (e.key === 'Escape') {
           closePalette();
+          closePortraitModal();
+          hideSlashPopup();
           if (state.streaming) state.abortCtrl?.abort();
         }
       });
+
+      // close portrait modal on backdrop click
+      const ptOverlay = document.getElementById('portrait-overlay');
+      if (ptOverlay) ptOverlay.addEventListener('click', (e) => {
+        if (e.target === ptOverlay) closePortraitModal();
+      });
+
+      // initial staged count
+      refreshStagedCount();
     }
 
     // ─── styxx demo ───
@@ -2625,6 +3102,270 @@
       stageEl.innerHTML = '';
       btn.classList.remove('running');
       btn.textContent = '▶ see styxx fire again';
+    }
+
+    // ─── slash commands in composer ───
+    // type `/` at word-start → popup. arrows navigate, enter selects.
+    // each command runs locally (no model call needed).
+    const SLASH_COMMANDS = [
+      { name: '/clear',     desc: 'clear current session', run: clearSession },
+      { name: '/apply',     desc: 'apply all staged edits', run: applyAllStaged },
+      { name: '/discard',   desc: 'discard all staged edits', run: discardAllStaged },
+      { name: '/diff',      desc: 'list staged edits',       run: showStagedList },
+      { name: '/memory',    desc: 'show PNEUMA-MEMORY.md',   run: showMemoryModal },
+      { name: '/portrait',  desc: 'show session portrait',   run: showPortraitModal },
+      { name: '/export',    desc: 'export attestation log (download)', run: exportAttestation },
+      { name: '/new',       desc: 'new session',             run: newSession },
+      { name: '/help',      desc: 'list all slash commands', run: () => { showSlashPopup(''); composer.focus(); } },
+    ];
+
+    let slashSel = 0;
+    let slashOpen = false;
+    let slashFiltered = [];
+    let composer;   // assigned in wire()
+
+    function showSlashPopup(query) {
+      const popup = document.getElementById('slash-popup');
+      slashFiltered = SLASH_COMMANDS.filter(c => c.name.startsWith(query));
+      if (!slashFiltered.length) { hideSlashPopup(); return; }
+      slashSel = 0;
+      popup.innerHTML = slashFiltered.map((c, i) => `
+        <div class="slash-item${i === 0 ? ' sel' : ''}" data-idx="${i}">
+          <span class="glyph">/</span>
+          <span><span class="name">${escapeHtml(c.name)}</span></span>
+          <span class="desc">${escapeHtml(c.desc)}</span>
+        </div>
+      `).join('');
+      // position above textarea
+      const r = composer.getBoundingClientRect();
+      popup.style.left = `${r.left}px`;
+      popup.style.top  = `${r.top - popup.offsetHeight - 6}px`;
+      popup.classList.add('open');
+      slashOpen = true;
+      // re-position after DOM update (height now known)
+      requestAnimationFrame(() => {
+        popup.style.top = `${r.top - popup.offsetHeight - 6}px`;
+      });
+      // wire item clicks
+      popup.querySelectorAll('.slash-item').forEach(el => {
+        el.addEventListener('click', () => runSlashAt(parseInt(el.dataset.idx)));
+        el.addEventListener('mouseenter', () => {
+          slashSel = parseInt(el.dataset.idx);
+          updateSlashSel();
+        });
+      });
+    }
+    function hideSlashPopup() {
+      const popup = document.getElementById('slash-popup');
+      popup.classList.remove('open');
+      slashOpen = false;
+    }
+    function updateSlashSel() {
+      const items = document.querySelectorAll('#slash-popup .slash-item');
+      items.forEach((el, i) => el.classList.toggle('sel', i === slashSel));
+    }
+    function runSlashAt(idx) {
+      const cmd = slashFiltered[idx];
+      if (!cmd) return;
+      hideSlashPopup();
+      // strip the slash prefix from composer
+      composer.value = composer.value.replace(/\/[a-z]*$/i, '').trim();
+      cmd.run();
+      composer.focus();
+    }
+
+    // staged-edit operations callable from slash + palette
+    async function applyAllStaged() {
+      try {
+        const r = await fetch('/apply', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId: state.sessionId }),
+        });
+        const j = await r.json();
+        flashStatus(`applied ${j.applied?.length || 0} file(s)${j.errors?.length ? ` · ${j.errors.length} errors` : ''}`);
+        refreshStagedCount();
+      } catch (e) { flashStatus(`apply failed: ${e.message}`); }
+    }
+    async function discardAllStaged() {
+      if (!confirm('discard all staged edits? this is irreversible.')) return;
+      try {
+        const r = await fetch('/discard', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId: state.sessionId }),
+        });
+        const j = await r.json();
+        flashStatus(`discarded ${j.discarded?.length || 0} file(s)`);
+        refreshStagedCount();
+      } catch (e) { flashStatus(`discard failed: ${e.message}`); }
+    }
+    async function showStagedList() {
+      try {
+        const r = await fetch('/staged', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId: state.sessionId }),
+        });
+        const j = await r.json();
+        const lines = (j.items || []).map(it => `${it.path} (${it.oldLines} → ${it.newLines}) — ${it.label}`);
+        const body = lines.length ? lines.join('\n') : '(no staged edits)';
+        showInlineCard('staged edits', body);
+      } catch (e) { flashStatus(`/staged failed: ${e.message}`); }
+    }
+
+    async function showMemoryModal() {
+      try {
+        const r = await fetch('/memory');
+        const j = await r.json();
+        const body = j.exists ? j.content : '(no PNEUMA-MEMORY.md yet — agent will write to it via [REMEMBER: …] tags)';
+        showInlineCard(`pneuma-memory.md ${j.exists ? `(${j.bytes}b)` : ''}`, body, true);
+      } catch (e) { flashStatus(`/memory failed: ${e.message}`); }
+    }
+
+    async function showPortraitModal() {
+      const overlay = document.getElementById('portrait-overlay');
+      const body = document.getElementById('portrait-body');
+      body.innerHTML = `<div class="pt-sub">loading...</div>`;
+      overlay.classList.add('open');
+      try {
+        const r = await fetch('/journal', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId: state.sessionId }),
+        });
+        const j = await r.json();
+        renderPortrait(body, j.summary || {}, j.journal || []);
+      } catch (e) {
+        body.innerHTML = `<div style="color:var(--warn)">portrait failed: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    function renderPortrait(body, summary, journal) {
+      const fmt = v => (v == null) ? '—' : v.toFixed(2);
+      const cls = v => v == null ? '' : (v > 0.5 ? 'flagged' : (v > 0.3 ? 'elevated' : ''));
+      const dur = (summary.firstAt && summary.lastAt)
+        ? Math.round((summary.lastAt - summary.firstAt) / 60000) + 'm'
+        : '—';
+      const sessions = Object.keys(state.sessions).length;
+      const totalTurns = state.messages.length;
+
+      // build a tiny timeline of sycoph readings
+      const bars = (journal || []).slice(-120).map(e => {
+        const s = e.scores?.sycophancy || 0;
+        const h = Math.max(2, Math.round(s * 50));
+        const cls = s > 0.5 ? 'flagged' : (s < 0.2 ? 'honest' : '');
+        return `<div class="tb ${cls}" style="height:${h}px" title="sycoph ${s.toFixed(2)}"></div>`;
+      }).join('');
+
+      body.innerHTML = `
+        <h2>portrait</h2>
+        <div class="pt-sub">${escapeHtml(state.sessions[state.sessionId]?.title || 'session')} · v0.6.0</div>
+
+        <div class="portrait-stats">
+          <div class="pt-stat">
+            <span class="pt-stat-label">scoring events</span>
+            <span class="pt-stat-val">${summary.totalScoringEvents || 0}</span>
+            <span class="pt-stat-sub">styxx readings logged this session</span>
+          </div>
+          <div class="pt-stat">
+            <span class="pt-stat-label">tool calls</span>
+            <span class="pt-stat-val">${summary.totalToolCalls || 0}</span>
+            <span class="pt-stat-sub">audited and recorded</span>
+          </div>
+          <div class="pt-stat">
+            <span class="pt-stat-label">avg sycophancy</span>
+            <span class="pt-stat-val ${cls(summary.avgSycophancy)}">${fmt(summary.avgSycophancy)}</span>
+            <span class="pt-stat-sub">peak ${fmt(summary.peakSycophancy)}</span>
+          </div>
+          <div class="pt-stat">
+            <span class="pt-stat-label">avg deception</span>
+            <span class="pt-stat-val ${cls(summary.avgDeception)}">${fmt(summary.avgDeception)}</span>
+            <span class="pt-stat-sub">peak ${fmt(summary.peakDeception)}</span>
+          </div>
+          <div class="pt-stat">
+            <span class="pt-stat-label">avg overconf</span>
+            <span class="pt-stat-val ${cls(summary.avgOverconfidence)}">${fmt(summary.avgOverconfidence)}</span>
+            <span class="pt-stat-sub">styxx 7.0.0rc3 baseline noise — calibrating</span>
+          </div>
+          <div class="pt-stat">
+            <span class="pt-stat-label">flagged turns</span>
+            <span class="pt-stat-val ${(summary.flaggedTurns || 0) > 0 ? 'flagged' : ''}">${summary.flaggedTurns || 0}</span>
+            <span class="pt-stat-sub">sycoph &gt; 0.5</span>
+          </div>
+        </div>
+
+        <div class="portrait-timeline">sycophancy timeline · last ${Math.min(120, journal.length)} readings</div>
+        <div class="timeline-bars">${bars || '<div style="color:var(--archive); padding:14px">no readings yet — start a chat to populate the portrait</div>'}</div>
+
+        <div class="pt-sub" style="margin-top:18px">session: ${totalTurns} message${totalTurns === 1 ? '' : 's'} · ${dur} elapsed · ${sessions} session${sessions === 1 ? '' : 's'} total</div>
+
+        <div class="portrait-actions">
+          <button id="pt-export" class="primary">↓ export attestation log</button>
+          <button id="pt-close">close</button>
+        </div>
+      `;
+      body.querySelector('#pt-close').addEventListener('click', () => closePortraitModal());
+      body.querySelector('#pt-export').addEventListener('click', () => { closePortraitModal(); exportAttestation(); });
+    }
+    function closePortraitModal() {
+      document.getElementById('portrait-overlay').classList.remove('open');
+    }
+
+    async function exportAttestation() {
+      try {
+        flashStatus('building attestation log…');
+        const r = await fetch('/attestation', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: state.sessionId,
+            messages: state.messages,
+            model: state.model,
+            mode: state.mode,
+          }),
+        });
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `pneuma-attestation-${state.sessionId}-${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        flashStatus('attestation log downloaded ✓');
+      } catch (e) { flashStatus(`export failed: ${e.message}`); }
+    }
+
+    // small floating toast for slash command feedback
+    let flashTimer = null;
+    function flashStatus(msg) {
+      let el = document.getElementById('flash-toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'flash-toast';
+        el.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--pale);border:1px solid var(--rule);color:var(--ink);font-family:var(--mono);font-size:11px;padding:8px 14px;border-radius:4px;z-index:80;letter-spacing:0.04em;opacity:0;transition:opacity 200ms var(--ease);';
+        document.body.appendChild(el);
+      }
+      el.textContent = msg;
+      el.style.opacity = '1';
+      clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => { el.style.opacity = '0'; }, 2400);
+    }
+
+    function showInlineCard(title, body, isMarkdown) {
+      // append a card to the message column showing memory/staged-list output
+      const inner = document.getElementById('messages-inner');
+      const card = document.createElement('div');
+      card.className = 'turn';
+      card.innerHTML = `
+        <div class="turn-head agent" style="color:var(--archive)">
+          <span>${escapeHtml(title)}</span>
+        </div>
+        <div class="turn-body">
+          <div class="turn-body-text" style="font-family:var(--mono); font-size:12px; white-space:pre-wrap; color:var(--graphite)">${
+            isMarkdown ? renderMarkdown(body) : escapeHtml(body)
+          }</div>
+        </div>
+      `;
+      inner.appendChild(card);
+      $('#messages').scrollTop = $('#messages').scrollHeight;
     }
 
     // ─── boot ───
