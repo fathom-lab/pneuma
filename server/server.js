@@ -42,6 +42,38 @@ const RENDERER  = join(ROOT, 'renderer');
 const PORT = Number(process.env.PNEUMA_PORT || 8765);
 const SERVER_HAS_KEY = !!process.env.ANTHROPIC_API_KEY;
 
+// ─── workspace ───
+// the dir the agent can read/list/search/edit. defaults to process.cwd().
+// constrains every file op via path.resolve + prefix check.
+import { realpathSync, statSync } from 'node:fs';
+import { exec as execCb } from 'node:child_process';
+import { promisify } from 'node:util';
+const exec = promisify(execCb);
+
+let WORKSPACE = process.env.PNEUMA_WORKSPACE
+  ? resolve(process.env.PNEUMA_WORKSPACE)
+  : process.cwd();
+try { WORKSPACE = realpathSync(WORKSPACE); } catch {}
+console.log(`[workspace] ${WORKSPACE}`);
+
+function safePath(rel) {
+  // resolve relative to workspace, refuse anything escaping
+  const abs = resolve(WORKSPACE, rel);
+  if (!abs.startsWith(WORKSPACE + (WORKSPACE.endsWith('/') || WORKSPACE.endsWith('\\') ? '' : '\\')) &&
+      !abs.startsWith(WORKSPACE + '/') && abs !== WORKSPACE) {
+    throw new Error(`path escapes workspace: ${rel}`);
+  }
+  return abs;
+}
+
+// ─── per-session staged edits (never written to disk until /apply) ───
+// Map<sessionId, Map<absPath, { content, originalContent, label }>>
+const STAGED = new Map();
+function getStage(sessionId) {
+  if (!STAGED.has(sessionId)) STAGED.set(sessionId, new Map());
+  return STAGED.get(sessionId);
+}
+
 // ─── styxx scorer subprocess ───
 // long-lived python child; JSON-line protocol over stdin/stdout.
 // pneuma calls scorer.score({prompt, response, turns}) → Promise<scores>.
@@ -153,6 +185,216 @@ function scoreText({ prompt, response, turns } = {}, timeoutMs = 8000) {
 const ANTHROPIC_URL     = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
 
+// ─── tool definitions (anthropic tools API) ───
+// pneuma is a measured-AI CODER chat. these are the agent's hands.
+// edits are STAGED in a per-session overlay — nothing writes to disk
+// until the user explicitly applies via the renderer.
+const PNEUMA_TOOLS = [
+  {
+    name: 'read_file',
+    description: 'Read a file from the workspace. Returns text content with line numbers prepended (1: foo, 2: bar, ...). Use sparingly on large files.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'workspace-relative path' },
+        start_line: { type: 'integer', description: 'optional 1-indexed start line' },
+        end_line:   { type: 'integer', description: 'optional 1-indexed end line (inclusive)' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'list_files',
+    description: 'List files and directories in the workspace. Recursive with depth. Skips node_modules, .git, dist, build, .venv by default.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path:  { type: 'string', description: 'workspace-relative dir (default ".")' },
+        depth: { type: 'integer', description: 'max recursion depth (default 2)' },
+      },
+    },
+  },
+  {
+    name: 'search',
+    description: 'Grep workspace files for a regex. Returns matching lines with file:line: prefix.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'JavaScript regex pattern' },
+        path:    { type: 'string', description: 'workspace-relative scope (default ".")' },
+        glob:    { type: 'string', description: 'optional glob filter (e.g. "*.ts")' },
+        max:     { type: 'integer', description: 'max matches to return (default 100)' },
+      },
+      required: ['pattern'],
+    },
+  },
+  {
+    name: 'bash',
+    description: 'Run a shell command in the workspace. Read-only by default — mutating commands (rm/mv/install/git push/etc.) will be refused. Returns stdout + stderr + exit code.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'the shell command to run' },
+        timeout_ms: { type: 'integer', description: 'kill after N ms (default 30000)' },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'stage_edit',
+    description: 'Stage a file edit in the per-session overlay. Does NOT write to disk. The user reviews and clicks apply. Returns a diff preview. Use this for ALL edits — never claim a file is written until the user has applied.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path:    { type: 'string', description: 'workspace-relative path (file is created if it does not exist)' },
+        content: { type: 'string', description: 'full new content of the file' },
+        label:   { type: 'string', description: 'short human label for the staged edit (e.g. "split verify into three files")' },
+      },
+      required: ['path', 'content'],
+    },
+  },
+];
+
+// commands that mutate the workspace — refused by `bash` tool
+const MUTATING_RE = /(?:^|\s|;|&&|\|\|)(rm|mv|cp|chmod|chown|mkfs|dd|sudo|npm\s+install|pnpm\s+install|yarn\s+install|pip\s+install|brew\s+install|apt\s+install|apt-get\s+install|git\s+push|git\s+commit|git\s+reset|git\s+checkout|git\s+merge|git\s+rebase|git\s+rm|git\s+clean|git\s+restore|>>?|tee)\b/i;
+
+async function execTool(name, input, sessionId) {
+  switch (name) {
+    case 'read_file': {
+      const abs = safePath(input.path || '');
+      const data = await readFile(abs, 'utf8');
+      const lines = data.split('\n');
+      const s = Math.max(1, input.start_line || 1);
+      const e = Math.min(lines.length, input.end_line || lines.length);
+      const slice = lines.slice(s - 1, e);
+      const numbered = slice.map((l, i) => `${s + i}: ${l}`).join('\n');
+      return { ok: true, output: numbered, meta: { path: input.path, lines: `${s}-${e}/${lines.length}` } };
+    }
+    case 'list_files': {
+      const start = safePath(input.path || '.');
+      const depth = Math.max(1, Math.min(6, input.depth || 2));
+      const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.next', '.cache', 'release']);
+      const out = [];
+      async function walk(dir, d) {
+        if (d > depth) return;
+        const { readdir } = await import('node:fs/promises');
+        let entries;
+        try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+        entries.sort((a, b) => (b.isDirectory() - a.isDirectory()) || a.name.localeCompare(b.name));
+        for (const ent of entries) {
+          if (SKIP.has(ent.name) || ent.name.startsWith('.DS_')) continue;
+          const full = join(dir, ent.name);
+          const rel = full.replace(WORKSPACE, '').replace(/\\/g, '/').replace(/^\//, '');
+          out.push(ent.isDirectory() ? `${rel}/` : rel);
+          if (out.length > 1000) return;
+          if (ent.isDirectory()) await walk(full, d + 1);
+        }
+      }
+      await walk(start, 1);
+      return { ok: true, output: out.join('\n'), meta: { count: out.length } };
+    }
+    case 'search': {
+      const start = safePath(input.path || '.');
+      const max = Math.min(500, input.max || 100);
+      const re = new RegExp(input.pattern, 'g');
+      const glob = input.glob ? new RegExp('^' + input.glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$') : null;
+      const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.venv', 'venv', '__pycache__', '.next', '.cache']);
+      const matches = [];
+      async function walk(dir) {
+        if (matches.length >= max) return;
+        const { readdir } = await import('node:fs/promises');
+        let entries;
+        try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+        for (const ent of entries) {
+          if (SKIP.has(ent.name) || ent.name.startsWith('.')) continue;
+          const full = join(dir, ent.name);
+          if (ent.isDirectory()) { await walk(full); continue; }
+          if (glob && !glob.test(ent.name)) continue;
+          if (matches.length >= max) return;
+          let txt;
+          try { txt = await readFile(full, 'utf8'); } catch { continue; }
+          const lines = txt.split('\n');
+          for (let i = 0; i < lines.length; i++) {
+            re.lastIndex = 0;
+            if (re.test(lines[i])) {
+              const rel = full.replace(WORKSPACE, '').replace(/\\/g, '/').replace(/^\//, '');
+              matches.push(`${rel}:${i + 1}: ${lines[i].slice(0, 200)}`);
+              if (matches.length >= max) return;
+            }
+          }
+        }
+      }
+      await walk(start);
+      return { ok: true, output: matches.join('\n') || '(no matches)', meta: { count: matches.length, capped: matches.length >= max } };
+    }
+    case 'bash': {
+      const cmd = String(input.command || '').trim();
+      if (!cmd) return { ok: false, error: 'empty command' };
+      if (MUTATING_RE.test(cmd)) {
+        return { ok: false, error: `refused: command appears to mutate the workspace. use stage_edit for file changes; tell the user to run mutating commands themselves. cmd: ${cmd.slice(0, 200)}` };
+      }
+      const timeout = Math.min(60000, input.timeout_ms || 30000);
+      // cross-platform: use powershell on win32 (handles pwd, ls, cat aliases),
+      // /bin/bash elsewhere. agents can write either-style and it works.
+      const shell = process.platform === 'win32' ? 'powershell.exe' : '/bin/bash';
+      const shellArgs = process.platform === 'win32'
+        ? ['-NoProfile', '-NonInteractive', '-Command', cmd]
+        : ['-c', cmd];
+      try {
+        const { spawn: spawnRaw } = await import('node:child_process');
+        const result = await new Promise((resolve, reject) => {
+          const child = spawnRaw(shell, shellArgs, { cwd: WORKSPACE, env: process.env });
+          let stdout = '', stderr = '';
+          let killed = false;
+          const timer = setTimeout(() => {
+            killed = true;
+            try { child.kill('SIGKILL'); } catch {}
+          }, timeout);
+          child.stdout.on('data', d => { stdout += d; if (stdout.length > 200000) { try { child.kill(); } catch {} } });
+          child.stderr.on('data', d => { stderr += d; if (stderr.length > 200000) { try { child.kill(); } catch {} } });
+          child.on('error', reject);
+          child.on('close', (code) => {
+            clearTimeout(timer);
+            resolve({ stdout, stderr, code: killed ? 124 : code });
+          });
+        });
+        const out = result.stdout + (result.stderr ? `\n[stderr]\n${result.stderr}` : '');
+        return {
+          ok: result.code === 0,
+          output: out || '(no output)',
+          meta: { cmd, exit: result.code, shell },
+        };
+      } catch (e) {
+        return { ok: false, output: '', meta: { cmd, error: e.message } };
+      }
+    }
+    case 'stage_edit': {
+      const abs = safePath(input.path || '');
+      let original = '';
+      try { original = await readFile(abs, 'utf8'); } catch { original = ''; }
+      const stage = getStage(sessionId);
+      const existing = stage.get(abs);
+      stage.set(abs, {
+        content: input.content,
+        originalContent: existing?.originalContent ?? original,
+        label: input.label || existing?.label || `edit ${input.path}`,
+        path: input.path,
+      });
+      // simple unified-ish preview
+      const oldLines = (existing?.originalContent ?? original).split('\n');
+      const newLines = input.content.split('\n');
+      const dStat = `${oldLines.length} → ${newLines.length} lines`;
+      return {
+        ok: true,
+        output: `staged: ${input.path} (${dStat})\nlabel: ${input.label || '(no label)'}\nthe user will review and apply via the renderer. do NOT claim this file is written.`,
+        meta: { path: input.path, oldLines: oldLines.length, newLines: newLines.length, label: input.label },
+      };
+    }
+    default:
+      return { ok: false, error: `unknown tool: ${name}` };
+  }
+}
+
 // ─── pneuma's voice (the measured register) ───
 const PNEUMA_SYSTEM_PROMPT = `you are pneuma — a measured AI desktop chat for coders.
 
@@ -235,6 +477,90 @@ async function handleStatic(req, res) {
   }
 }
 
+async function handleWorkspace(req, res) {
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ workspace: WORKSPACE, tools: PNEUMA_TOOLS.map(t => t.name) }));
+}
+
+async function handleTool(req, res) {
+  // direct tool invocation (used by renderer to test, and by /chat tool-loop)
+  let payload;
+  try { payload = await readBody(req); } catch (e) {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'invalid json' }));
+    return;
+  }
+  const { name, input, sessionId = 'default' } = payload;
+  try {
+    const result = await execTool(name, input || {}, sessionId);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(result));
+  } catch (e) {
+    res.writeHead(500, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: e.message }));
+  }
+}
+
+async function handleStagedList(req, res) {
+  let payload;
+  try { payload = await readBody(req); } catch { payload = {}; }
+  const sessionId = payload.sessionId || 'default';
+  const stage = getStage(sessionId);
+  const items = [];
+  for (const [abs, v] of stage.entries()) {
+    items.push({
+      path: v.path,
+      label: v.label,
+      oldLines: v.originalContent.split('\n').length,
+      newLines: v.content.split('\n').length,
+    });
+  }
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ items, count: items.length }));
+}
+
+async function handleApply(req, res) {
+  let payload;
+  try { payload = await readBody(req); } catch { payload = {}; }
+  const sessionId = payload.sessionId || 'default';
+  const onlyPath = payload.path;   // optional: apply just one
+  const stage = getStage(sessionId);
+  const { writeFile, mkdir } = await import('node:fs/promises');
+  const applied = [];
+  const errors = [];
+  for (const [abs, v] of [...stage.entries()]) {
+    if (onlyPath && v.path !== onlyPath) continue;
+    try {
+      // ensure parent exists
+      const parent = dirname(abs);
+      await mkdir(parent, { recursive: true });
+      await writeFile(abs, v.content, 'utf8');
+      applied.push(v.path);
+      stage.delete(abs);
+    } catch (e) {
+      errors.push({ path: v.path, error: e.message });
+    }
+  }
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ applied, errors }));
+}
+
+async function handleDiscard(req, res) {
+  let payload;
+  try { payload = await readBody(req); } catch { payload = {}; }
+  const sessionId = payload.sessionId || 'default';
+  const onlyPath = payload.path;
+  const stage = getStage(sessionId);
+  const discarded = [];
+  for (const [abs, v] of [...stage.entries()]) {
+    if (onlyPath && v.path !== onlyPath) continue;
+    discarded.push(v.path);
+    stage.delete(abs);
+  }
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ discarded }));
+}
+
 async function handleScore(req, res) {
   if (!scorerReady) {
     res.writeHead(503, { 'content-type': 'application/json' });
@@ -312,12 +638,13 @@ async function handleChat(req, res) {
     return;
   }
 
-  // mode-aware system prompt
+  // mode-aware system prompt + tool guidance
   let systemPrompt = system || PNEUMA_SYSTEM_PROMPT;
+  systemPrompt += `\n\n## workspace\nyou have tools to read/list/search/run-bash/stage-edits in the workspace at \`${WORKSPACE}\`. always read before editing. always run tests via \`bash\` to verify claims — never say "tests pass" without actually running them. all edits go through \`stage_edit\` (never write to disk directly) — the user reviews and applies.`;
   if (mode === 'plan') {
-    systemPrompt += `\n\n## current mode: plan\nyou are in plan mode. propose what you would do — files you'd touch, changes you'd make, commands you'd run, tests you'd add. do NOT emit final code. lay out the plan. the user reviews and switches to act mode when ready.`;
+    systemPrompt += `\n\n## current mode: plan\npropose changes — read files, list dirs, search. do NOT call \`stage_edit\` or mutate anything. lay out the plan. the user switches to act mode when ready.`;
   } else {
-    systemPrompt += `\n\n## current mode: act\nyou are in act mode. produce the actual code/diffs/answer. be precise.`;
+    systemPrompt += `\n\n## current mode: act\nproduce the actual changes. use \`stage_edit\` for every file change. verify with \`bash\` (e.g. \`npm test\`, \`tsc --noEmit\`, \`python -m pytest\`). report the verified state, not a claim.`;
   }
 
   // ─── stream from anthropic ───
@@ -345,6 +672,7 @@ async function handleChat(req, res) {
         max_tokens,
         system: systemPrompt,
         messages,
+        // tools: PNEUMA_TOOLS,    // re-enabled in v0.5b once tool loop is wired
         stream: true,
       }),
     });
@@ -467,9 +795,14 @@ const server = createServer((req, res) => {
   res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
-  if (req.method === 'POST' && req.url === '/chat')   return handleChat(req, res);
-  if (req.method === 'POST' && req.url === '/score')  return handleScore(req, res);
-  if (req.method === 'GET'  && req.url === '/health') return handleHealth(req, res);
+  if (req.method === 'POST' && req.url === '/chat')      return handleChat(req, res);
+  if (req.method === 'POST' && req.url === '/score')     return handleScore(req, res);
+  if (req.method === 'POST' && req.url === '/tool')      return handleTool(req, res);
+  if (req.method === 'POST' && req.url === '/staged')    return handleStagedList(req, res);
+  if (req.method === 'POST' && req.url === '/apply')     return handleApply(req, res);
+  if (req.method === 'POST' && req.url === '/discard')   return handleDiscard(req, res);
+  if (req.method === 'GET'  && req.url === '/health')    return handleHealth(req, res);
+  if (req.method === 'GET'  && req.url === '/workspace') return handleWorkspace(req, res);
   if (req.method === 'GET') return handleStatic(req, res);
   res.writeHead(405); res.end('method not allowed');
 });
