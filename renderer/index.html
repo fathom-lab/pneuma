@@ -1018,6 +1018,14 @@
     uniform vec2 u_res;
     uniform float u_time, u_attentive, u_seed;
 
+    // ─── mood uniforms — drive the body's expression ───
+    uniform float u_m_intensity;   // 0..1 — overall dramatic factor
+    uniform float u_m_lean;        // -1..1 — left/right asymmetry
+    uniform float u_m_chaos;       // 0..1 — micro-jitter, glitch
+    uniform float u_m_glow;        // 0..1 — halo + bloom
+    uniform float u_m_scale;       // 0.7..1.4 — body size
+    uniform float u_m_spike;       // 0..1 — radial spike emergence
+
     float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     float vnoise(vec2 p){
       vec2 i = floor(p), f = fract(p);
@@ -1036,34 +1044,84 @@
       float k1 = length(p / (r * r));
       return k0 * (k0 - 1.0) / max(k1, 0.0001);
     }
+
     void main(){
       vec2 uv = (gl_FragCoord.xy - 0.5*u_res) / min(u_res.x, u_res.y);
       uv.y = -uv.y;
+
+      // breath cycle
       float breath = 0.5 + 0.5 * sin(u_time * 1.047 + u_seed * 6.283);
-      vec2 bodyR = vec2(0.36 + breath*0.012, 0.46 + breath*0.020);
+
+      // base size — modulated by mood scale
+      vec2 bodyR = vec2(0.36 + breath*0.012, 0.46 + breath*0.020) * u_m_scale;
+
+      // angular position
       float ang  = atan(uv.y, uv.x);
+
+      // surface tension wobble — base + chaos amplification
       float angN = fbm(vec2(ang*4.0 + u_seed*12.0, u_time*0.30 + u_seed*7.0)) - 0.5;
-      float d = sdEllipse(uv, bodyR) + angN*0.030;
+      float wobbleAmp = 0.030 + u_m_chaos * 0.045;
+
+      // radial spikes — sharp lobes in the SDF when intensity/spike high
+      float spikeFreq = 6.0 + 4.0 * u_m_spike;
+      float spikeAmp  = u_m_spike * 0.060 * (0.6 + 0.4 * u_m_intensity);
+      float spikePhase = u_time * (0.6 + u_m_chaos * 1.2) + u_seed * 3.0;
+      float spike = spikeAmp * pow(0.5 + 0.5 * sin(ang * spikeFreq + spikePhase), 2.0);
+
+      // micro-jitter from chaos — tiny unstable wobble
+      float jitter = u_m_chaos * 0.012 * (vnoise(vec2(ang*30.0, u_time*4.0)) - 0.5) * 2.0;
+
+      // lateral lean — push body sideways
+      vec2 leanShift = vec2(u_m_lean * 0.04, 0.0);
+
+      // SDF
+      float d = sdEllipse(uv - leanShift, bodyR) + angN*wobbleAmp - spike + jitter;
+
       if (d > 0.012) { gl_FragColor = vec4(0.0); return; }
+
+      // ── ink color ──
       vec3 inkBase = vec3(0.013, 0.011, 0.020);
+
       float skinThin = exp(-abs(d)*220.0)*0.85;
       float skin     = exp(-abs(d)*38.0)*0.32;
-      float depth    = -d;
-      float darken   = 1.0 - smoothstep(0.0, 0.36, depth);
-      float glint = pow(max(0.0, fbm(uv*32.0 + u_time*0.8 + u_seed*4.0) - 0.62), 4.0)*9.0;
+
+      float depth   = -d;
+      float darken  = 1.0 - smoothstep(0.0, 0.36, depth);
+
+      // chaos-driven glint flutter
+      float glintNoise = fbm(uv*32.0 + u_time*(0.8 + u_m_chaos*1.5) + u_seed*4.0);
+      float glint = pow(max(0.0, glintNoise - 0.62), 4.0)*9.0;
       glint *= exp(-abs(d)*50.0);
-      vec2 hlc = vec2(0.06, 0.10);
-      float spec = exp(-pow(length((uv - hlc) * vec2(1.8,1.4)), 2.0)*65.0)*0.55*(0.7+0.3*breath);
+
+      // specular highlight position — drifts with lean
+      vec2 hlc = vec2(0.06 + u_m_lean*0.04, 0.10 - u_m_intensity*0.02);
+      float spec = exp(-pow(length((uv - hlc) * vec2(1.8,1.4)), 2.0)*65.0)
+                 * (0.55 + 0.30 * u_m_glow) * (0.7 + 0.3 * breath);
+
+      // internal grain
       float n = fbm(uv*5.0 + u_time*0.08 + u_seed*3.0);
+
       vec3 col = inkBase;
       col += skinThin * vec3(0.95,0.92,0.84);
       col += skin     * vec3(0.78,0.74,0.62);
       col += spec     * vec3(0.96,0.94,0.88);
       col += glint    * vec3(0.85,0.78,0.55);
       col *= darken * (0.85 + n*0.30);
-      col += u_attentive * 0.020 * vec3(0.82,0.72,0.45);
-      float halo = exp(-max(d,0.0)*90.0)*0.05*(0.6+0.4*u_attentive);
+
+      // mood glow — champagne bloom when expressive
+      col += (u_attentive * 0.020 + u_m_glow * 0.030) * vec3(0.82,0.72,0.45);
+
+      // outer halo — intensifies with glow + intensity
+      float haloStrength = 0.05 + u_m_glow * 0.10 + u_m_intensity * 0.04;
+      float halo = exp(-max(d,0.0)*90.0) * haloStrength * (0.6 + 0.4 * u_attentive);
       col += vec3(0.96,0.94,0.88)*halo;
+
+      // intensity-driven warm core (subtle red shift in furious/cosmic moods)
+      if (u_m_intensity > 0.5) {
+        float warmShift = (u_m_intensity - 0.5) * 2.0;
+        col.r += warmShift * 0.012 * darken;
+      }
+
       gl_FragColor = vec4(col, 1.0);
     }
   </script>
@@ -1097,6 +1155,12 @@
       const u_time = gl.getUniformLocation(prog, 'u_time');
       const u_attentive = gl.getUniformLocation(prog, 'u_attentive');
       const u_seed = gl.getUniformLocation(prog, 'u_seed');
+      const u_m_intensity = gl.getUniformLocation(prog, 'u_m_intensity');
+      const u_m_lean      = gl.getUniformLocation(prog, 'u_m_lean');
+      const u_m_chaos     = gl.getUniformLocation(prog, 'u_m_chaos');
+      const u_m_glow      = gl.getUniformLocation(prog, 'u_m_glow');
+      const u_m_scale     = gl.getUniformLocation(prog, 'u_m_scale');
+      const u_m_spike     = gl.getUniformLocation(prog, 'u_m_spike');
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       function fit() {
         const r = canvas.getBoundingClientRect();
@@ -1108,11 +1172,25 @@
       let attentive = 0;
       const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
       const t0 = performance.now();
+
+      // per-canvas mood smoothing — live buddies follow state.mood.current,
+      // sigil canvases bake the snapshot from their dataset
+      const isLive = canvas.dataset.buddy?.startsWith('live');
+      const sigilMood = isLive ? null : (canvas.dataset.mood ? JSON.parse(canvas.dataset.mood) : null);
+      const localMood = { intensity: 0.30, lean: 0, chaos: 0, glow: 0, scale: 1.0, spike: 0 };
+      if (sigilMood) Object.assign(localMood, sigilMood);
+
       function tick(now) {
         const t = (now - t0) / 1000;
-        const live = canvas.dataset.buddy?.startsWith('live');
-        const target = live && (document.body.classList.contains('attentive') || document.body.classList.contains('streaming')) ? 1 : 0;
+        const target = isLive && (document.body.classList.contains('attentive') || document.body.classList.contains('streaming')) ? 1 : 0;
         attentive += (target - attentive) * 0.08;
+
+        // for live buddies, pull from global state.mood.current (which lerps in main loop)
+        let m = localMood;
+        if (isLive && window.state && window.state.mood && window.state.mood.current) {
+          m = window.state.mood.current;
+        }
+
         gl.useProgram(prog);
         gl.bindBuffer(gl.ARRAY_BUFFER, buf);
         gl.vertexAttribPointer(a_pos, 2, gl.FLOAT, false, 0, 0);
@@ -1120,6 +1198,12 @@
         gl.uniform1f(u_time, reduced ? 0.0 : t);
         gl.uniform1f(u_attentive, attentive);
         gl.uniform1f(u_seed, seed);
+        gl.uniform1f(u_m_intensity, m.intensity);
+        gl.uniform1f(u_m_lean,      m.lean);
+        gl.uniform1f(u_m_chaos,     m.chaos);
+        gl.uniform1f(u_m_glow,      m.glow);
+        gl.uniform1f(u_m_scale,     m.scale);
+        gl.uniform1f(u_m_spike,     m.spike);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         requestAnimationFrame(tick);
       }
@@ -1161,8 +1245,34 @@
       'claude-haiku-4-5-20251001':  { label: 'haiku 4.5', in: 0.80, out: 4.0 },
     };
 
+    // ─── mood map — agent → ferrofluid embodiment ───
+    // each mood is a target uniform set; the live buddy lerps toward state.mood.target
+    // these get serialized into per-turn sigil canvases as a frozen snapshot
+    const MOODS = {
+      'at-rest':   { intensity: 0.25, lean:  0.00, chaos: 0.00, glow: 0.00, scale: 1.00, spike: 0.00 },
+      'thinking':  { intensity: 0.50, lean:  0.05, chaos: 0.15, glow: 0.30, scale: 1.00, spike: 0.10 },
+      'focused':   { intensity: 0.65, lean:  0.00, chaos: 0.05, glow: 0.45, scale: 1.04, spike: 0.30 },
+      'confident': { intensity: 0.70, lean:  0.00, chaos: 0.00, glow: 0.65, scale: 1.08, spike: 0.50 },
+      'confused':  { intensity: 0.30, lean: -0.30, chaos: 0.70, glow: 0.10, scale: 0.94, spike: 0.05 },
+      'cosmic':    { intensity: 0.95, lean:  0.10, chaos: 0.40, glow: 0.95, scale: 1.14, spike: 0.75 },
+      'scheming':  { intensity: 0.40, lean: -0.40, chaos: 0.20, glow: 0.20, scale: 0.96, spike: 0.25 },
+      'tender':    { intensity: 0.40, lean:  0.00, chaos: 0.05, glow: 0.55, scale: 1.00, spike: 0.10 },
+      'furious':   { intensity: 1.00, lean:  0.20, chaos: 0.90, glow: 0.85, scale: 1.18, spike: 1.00 },
+      'zen':       { intensity: 0.20, lean:  0.00, chaos: 0.00, glow: 0.30, scale: 1.00, spike: 0.00 },
+    };
+    function moodCopy(m) { return { ...m }; }
+    function lerpMood(cur, tgt, k) {
+      cur.intensity += (tgt.intensity - cur.intensity) * k;
+      cur.lean      += (tgt.lean      - cur.lean)      * k;
+      cur.chaos     += (tgt.chaos     - cur.chaos)     * k;
+      cur.glow      += (tgt.glow      - cur.glow)      * k;
+      cur.scale     += (tgt.scale     - cur.scale)     * k;
+      cur.spike     += (tgt.spike     - cur.spike)     * k;
+    }
+
     const state = {
       apiKey: null,
+      serverHasKey: false,
       sessionId: null,
       sessions: {},
       messages: [],
@@ -1173,11 +1283,77 @@
       sessionTokensIn: 0,
       sessionTokensOut: 0,
       sessionCostUsd: 0,
-      sycoph: { totalCount: 0, recentTurns: [] },  // recentTurns: array of {hits: int}
+      sycoph: { totalCount: 0, recentTurns: [] },
+      mood: {
+        currentName: 'at-rest',
+        current: moodCopy(MOODS['at-rest']),
+        target:  moodCopy(MOODS['at-rest']),
+      },
     };
+    window.state = state;  // expose for shader to read
+
+    // global mood lerp loop — runs forever, smoothly transitions current → target
+    function moodTick() {
+      lerpMood(state.mood.current, state.mood.target, 0.06);
+      requestAnimationFrame(moodTick);
+    }
+    requestAnimationFrame(moodTick);
+
+    function setMood(name) {
+      const target = MOODS[name];
+      if (!target) return;
+      state.mood.currentName = name;
+      Object.assign(state.mood.target, target);
+      // update label in sidebar
+      const el = document.getElementById('buddy-status');
+      if (el && !state.streaming) el.textContent = name === 'at-rest' ? 'at rest' : name;
+    }
 
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+    // ─── stream mood parser — strip [MOOD: name] from display, fire setMood ───
+    // partial-tag aware: handles tags split across SSE deltas
+    function processStreamDelta(deltaText, msg) {
+      let working = (msg._pendingBuf || '') + deltaText;
+      let cleaned = '';
+      let lastEnd = 0;
+
+      // match complete [MOOD: name] tags (case-insensitive, hyphens allowed)
+      const re = /\[MOOD:\s*([a-z][a-z-]*)\s*\]/gi;
+      let m;
+      while ((m = re.exec(working)) !== null) {
+        cleaned += working.slice(lastEnd, m.index);
+        const name = m[1].toLowerCase();
+        if (MOODS[name]) {
+          setMood(name);
+          msg._lastMood = name;
+        }
+        lastEnd = m.index + m[0].length;
+      }
+
+      // tail — could contain a partial tag [MO... that we can't decide yet
+      const tail = working.slice(lastEnd);
+      // look for an incomplete tag at the end: [MOOD:... or just [
+      const partialMatch = tail.match(/\[(?:M(?:O(?:O(?:D(?::[\s\w-]*)?)?)?)?)?$/i);
+      if (partialMatch && partialMatch[0].length > 0) {
+        cleaned += tail.slice(0, partialMatch.index);
+        msg._pendingBuf = tail.slice(partialMatch.index);
+      } else {
+        cleaned += tail;
+        msg._pendingBuf = '';
+      }
+      return cleaned;
+    }
+
+    // ─── /health check — skip setup if server has key ───
+    async function checkHealth() {
+      try {
+        const r = await fetch('/health');
+        const j = await r.json();
+        state.serverHasKey = !!j.serverHasKey;
+      } catch (e) { console.warn('[pneuma] /health check failed', e); }
+    }
 
     // ─── persistence ───
     function load() {
@@ -1340,8 +1516,11 @@
         c.className = 'turn-buddy';
         c.dataset.buddy = 'sigil-' + (msg.ts || Date.now());
         c.dataset.seed = String((msg.sigilSeed ?? Math.random()) * 7);
+        // freeze the mood snapshot into the sigil so it renders that turn's expression
+        if (msg.mood) c.dataset.mood = JSON.stringify(msg.mood);
+        c.title = msg.moodName ? `mood: ${msg.moodName}` : '';
         head.appendChild(c);
-        head.insertAdjacentHTML('beforeend', `<span>pneuma</span>`);
+        head.insertAdjacentHTML('beforeend', `<span>pneuma${msg.moodName ? ` <span style="color:var(--archive);font-weight:400">· ${msg.moodName}</span>` : ''}</span>`);
       } else {
         head.insertAdjacentHTML('beforeend', `<span>you</span>`);
       }
@@ -1458,7 +1637,7 @@
       if (state.streaming) return;
       const trimmed = text.trim();
       if (!trimmed) return;
-      if (!state.apiKey) { showSetup(); return; }
+      if (!state.apiKey && !state.serverHasKey) { showSetup(); return; }
 
       // append user message
       const userMsg = { role: 'user', content: trimmed, ts: Date.now() };
@@ -1507,9 +1686,13 @@
           content: m.content,
         }));
 
+        // header: client key if set, else rely on server-side env (.env)
+        const headers = { 'content-type': 'application/json' };
+        if (state.apiKey) headers['x-pneuma-key'] = state.apiKey;
+
         const res = await fetch('/chat', {
           method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-pneuma-key': state.apiKey },
+          headers,
           body: JSON.stringify({
             messages: msgsForApi,
             model: state.model,
@@ -1529,6 +1712,7 @@
         const decoder = new TextDecoder();
         let buf = '';
         let pendingText = '';
+        let sseEventName = 'message';   // SSE event name, persists across lines
 
         while (true) {
           const { done, value } = await reader.read();
@@ -1537,9 +1721,38 @@
           const lines = buf.split('\n');
           buf = lines.pop() || '';
           for (const line of lines) {
+            // SSE event-name line — affects how we interpret the next data: line
+            if (line.startsWith('event:')) {
+              sseEventName = line.slice(6).trim();
+              continue;
+            }
+            if (line === '') {
+              // blank line ends an event; reset to default
+              sseEventName = 'message';
+              continue;
+            }
             if (!line.startsWith('data:')) continue;
             const data = line.slice(5).trim();
             if (!data || data === '[DONE]') continue;
+
+            // upstream / pneuma error event — surface, don't swallow
+            if (sseEventName === 'error' || sseEventName === 'pneuma-error') {
+              let parsed;
+              try { parsed = JSON.parse(data); } catch { parsed = { error: data }; }
+              const upstreamErr = parsed?.error;
+              let errMsg;
+              if (typeof upstreamErr === 'string') {
+                // anthropic upstream — try to peel the nested json
+                try {
+                  const inner = JSON.parse(upstreamErr);
+                  errMsg = inner?.error?.message || upstreamErr;
+                } catch { errMsg = upstreamErr; }
+              } else {
+                errMsg = upstreamErr?.message || JSON.stringify(parsed);
+              }
+              throw new Error(errMsg);
+            }
+
             let ev;
             try { ev = JSON.parse(data); } catch { continue; }
 
@@ -1547,11 +1760,14 @@
               assistantMsg.tokensIn = ev.message.usage.input_tokens || 0;
             }
             if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
-              pendingText += ev.delta.text;
-              assistantMsg.content += ev.delta.text;
-              appendDelta(bodyText, ev.delta.text);
-              setStatus('speaking');
-              // live HUD update — every ~50 chars or so
+              // parse + strip [MOOD: …] tags, fire setMood for any complete tags
+              const cleaned = processStreamDelta(ev.delta.text, assistantMsg);
+              if (cleaned) {
+                pendingText += cleaned;
+                assistantMsg.content += cleaned;
+                appendDelta(bodyText, cleaned);
+              }
+              setStatus(state.mood.currentName === 'at-rest' ? 'speaking' : state.mood.currentName);
               if (pendingText.length > 40) {
                 pendingText = '';
                 liveSycopUpdate(assistantMsg.content);
@@ -1574,6 +1790,15 @@
           console.error('[pneuma]', e);
         }
       } finally {
+        // freeze the per-turn mood for the sigil
+        assistantMsg.mood = moodCopy(state.mood.current);
+        assistantMsg.moodName = state.mood.currentName;
+
+        // settle to at-rest after a beat
+        setTimeout(() => {
+          if (!state.streaming) setMood('at-rest');
+        }, 900);
+
         // count sycophancy (real, honest)
         const hits = countSycoph(assistantMsg.content);
         assistantMsg.sycopHits = hits;
@@ -1766,14 +1991,18 @@
     }
 
     // ─── boot ───
-    function boot() {
+    async function boot() {
       load();
+      await checkHealth();
       ensureSession();
       wire();
       wireSetup();
       bootSidebarBuddies();
       renderAll();
-      if (!state.apiKey) showSetup();
+      // skip setup modal if either client key OR server has env key
+      if (!state.apiKey && !state.serverHasKey) showSetup();
+      // initial mood
+      setMood('at-rest');
     }
     boot();
   </script>
