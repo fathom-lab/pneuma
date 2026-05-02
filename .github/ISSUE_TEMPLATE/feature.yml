@@ -1,0 +1,66 @@
+name: feature
+description: a load-bearing addition that fits the seven principles
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        before filing — re-read [NORTH_STAR.md](../NORTH_STAR.md). pneuma refuses feature flexes; each addition must earn through the seven.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: what's the problem
+      description: what does someone trying to use pneuma encounter that this feature would fix?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: proposed change
+      description: be specific about what to build. UI, server, or both.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: principle
+    attributes:
+      label: which of the seven principles does this serve
+      multiple: true
+      options:
+        - "1. the body is the truth channel"
+        - "2. type resolves, doesn't stream"
+        - "3. the room reads like weather"
+        - "4. pre-cognition"
+        - "5. the portrait is four-dimensional"
+        - "6. no icons, no chrome, no frames"
+        - "7. one presence, one tone"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: what did you consider and reject
+      description: every accepted proposal beat at least one alternative. show your work.
+
+  - type: textarea
+    id: how_it_breaks
+    attributes:
+      label: how this could go wrong
+      description: what's the worst-case where this addition makes pneuma worse, not better?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: pre-flight
+      options:
+        - label: i re-read NORTH_STAR.md and the seven principles
+          required: true
+        - label: this is load-bearing — pneuma is worse without it, not just nicer with it
+          required: true
+        - label: this is not a crypto feature (the $NEUMA token lives off the product, not in it)
+          required: true

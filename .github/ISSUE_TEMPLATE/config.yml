@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: discussions — questions, ideas, "is this worth doing"
+    url: https://github.com/fathom-lab/pneuma/discussions
+    about: open here when the path forward isn't clear yet. issues are for actionable bugs and accepted features.
+  - name: styxx — the cognometric engine
+    url: https://github.com/fathom-lab/styxx
+    about: pneuma scores depend on styxx. measurement bugs often live there, not here.

@@ -1,0 +1,81 @@
+name: bug
+description: something is broken or behaves wrong
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        thanks for filing — be concrete. screenshots / logs > prose.
+
+  - type: input
+    id: pneuma_version
+    attributes:
+      label: pneuma version
+      description: from `package.json` or the bottom-left wordmark
+      placeholder: "0.6.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: vendor
+    attributes:
+      label: model vendor
+      options:
+        - anthropic (sk-ant-)
+        - openai (sk-)
+        - openrouter (sk-or-)
+        - other / unknown
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "macos 14.5 / windows 11 / ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: input
+    id: node_version
+    attributes:
+      label: node version
+      placeholder: "v24.13.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: what happened
+      description: be specific. what did you do, what did you expect, what actually happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: minimum repro steps
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: server / browser console logs
+      description: paste relevant output. redact API keys before posting.
+      render: shell
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: pre-flight
+      options:
+        - label: i searched existing issues and didn't find this one
+          required: true
+        - label: i didn't paste any API keys, secrets, or PII into this report
+          required: true
