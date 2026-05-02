@@ -2,6 +2,36 @@
   <img src="docs/banner.png" alt="π neuma — the body cannot lie" width="100%">
 </p>
 
+```
+
+
+                  ▁    ▂    ▃    ▅    ▆    █    ▇    ▅    ▃    ▂    ▁
+
+
+                                       ╱╲
+                                    ◢█████◣
+                                  ◢█████████◣
+                                  ◥█████████◤
+                                    ◥█████◤
+
+
+                  ── · ── · ── · ── · ── · ── · ── · ── · ── · ──
+
+
+                                   π    n e u m a
+
+
+                                the body cannot lie
+
+
+                  ── · ── · ── · ── · ── · ── · ── · ── · ── · ──
+
+
+                       fathom-lab    ·    runs styxx    ·    v 0 . 6 . 0
+
+
+```
+
 # pneuma
 
 > *the agent's body cannot conceal the score.*
