@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/banner.png" alt="π neuma — the body cannot lie" width="100%">
-</p>
-
 ```
 
 
