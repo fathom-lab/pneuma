@@ -1,3 +1,7 @@
+> **correction notice, 2026-11-09.** this file is kept as it was written. the lab later withdrew or bounded statements in it. the text below is unchanged; these are the receipts:
+> - "Pneuma is the first one that doesn't trust itself either" (line 52 as of this notice; the file's words) — withdrawn as a priority claim under the lab's rule of 2026-09-29: a priority sentence stands only if a survey under a frozen procedure priced it, and the lab has published no survey that priced this one. that note does not name this repository; what pneuma does stands on its own code — https://github.com/fathom-lab/styxx/blob/main/papers/NOTE_prior_art_credit_2026_09_29.md
+> a dated banner, not an edit in place, is the lab's practice since 2026-06-21. the lab's current record is https://github.com/fathom-lab/styxx .
+
 ```
 
 
